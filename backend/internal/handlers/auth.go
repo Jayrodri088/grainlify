@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 
 	"github.com/jagadeesh/grainlify/backend/internal/auth"
 	"github.com/jagadeesh/grainlify/backend/internal/config"
@@ -134,12 +135,43 @@ func (h *AuthHandler) Verify() fiber.Handler {
 
 func (h *AuthHandler) Me() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		userID, _ := c.Locals(auth.LocalUserID).(string)
+		if h.db == nil || h.db.Pool == nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "db_not_configured"})
+		}
+
+		userIDStr, _ := c.Locals(auth.LocalUserID).(string)
 		role, _ := c.Locals(auth.LocalRole).(string)
-		return c.Status(fiber.StatusOK).JSON(fiber.Map{
-			"id":   userID,
+		userID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid_user"})
+		}
+
+		// Get GitHub account info if linked
+		var githubLogin *string
+		var avatarURL *string
+		err = h.db.Pool.QueryRow(c.Context(), `
+SELECT login, avatar_url
+FROM github_accounts
+WHERE user_id = $1
+`, userID).Scan(&githubLogin, &avatarURL)
+		
+		response := fiber.Map{
+			"id":   userIDStr,
 			"role": role,
-		})
+		}
+
+		// Add GitHub info if available
+		if err == nil && githubLogin != nil {
+			githubMap := fiber.Map{
+				"login": *githubLogin,
+			}
+			if avatarURL != nil && *avatarURL != "" {
+				githubMap["avatar_url"] = *avatarURL
+			}
+			response["github"] = githubMap
+		}
+
+		return c.Status(fiber.StatusOK).JSON(response)
 	}
 }
 

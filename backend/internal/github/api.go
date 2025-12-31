@@ -21,8 +21,9 @@ func NewClient() *Client {
 }
 
 type User struct {
-	ID    int64  `json:"id"`
-	Login string `json:"login"`
+	ID        int64  `json:"id"`
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 func (c *Client) GetUser(ctx context.Context, accessToken string) (User, error) {

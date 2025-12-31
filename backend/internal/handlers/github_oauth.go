@@ -197,16 +197,17 @@ RETURNING id, role
 		}
 
 		_, err = h.db.Pool.Exec(c.Context(), `
-INSERT INTO github_accounts (user_id, github_user_id, login, access_token, token_type, scope)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO github_accounts (user_id, github_user_id, login, avatar_url, access_token, token_type, scope)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (user_id) DO UPDATE SET
   github_user_id = EXCLUDED.github_user_id,
   login = EXCLUDED.login,
+  avatar_url = EXCLUDED.avatar_url,
   access_token = EXCLUDED.access_token,
   token_type = EXCLUDED.token_type,
   scope = EXCLUDED.scope,
   updated_at = now()
-`, userID, u.ID, u.Login, encToken, tr.TokenType, tr.Scope)
+`, userID, u.ID, u.Login, u.AvatarURL, encToken, tr.TokenType, tr.Scope)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "github_account_upsert_failed"})
 		}
@@ -241,8 +242,9 @@ UPDATE users SET github_user_id = $2, updated_at = now() WHERE id = $1
 					"role": role,
 				},
 				"github": fiber.Map{
-					"id":    u.ID,
-					"login": u.Login,
+					"id":         u.ID,
+					"login":      u.Login,
+					"avatar_url": u.AvatarURL,
 				},
 			})
 		}
@@ -262,8 +264,9 @@ UPDATE users SET github_user_id = $2, updated_at = now() WHERE id = $1
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"ok": true,
 			"github": fiber.Map{
-				"id":    u.ID,
-				"login": u.Login,
+				"id":         u.ID,
+				"login":      u.Login,
+				"avatar_url": u.AvatarURL,
 			},
 		})
 	}
@@ -291,11 +294,12 @@ func (h *GitHubOAuthHandler) Status() fiber.Handler {
 
 		var githubUserID int64
 		var login string
+		var avatarURL *string
 		err = h.db.Pool.QueryRow(c.Context(), `
-SELECT github_user_id, login
+SELECT github_user_id, login, avatar_url
 FROM github_accounts
 WHERE user_id = $1
-`, userID).Scan(&githubUserID, &login)
+`, userID).Scan(&githubUserID, &login, &avatarURL)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.Status(fiber.StatusOK).JSON(fiber.Map{
 				"linked": false,
@@ -305,12 +309,16 @@ WHERE user_id = $1
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "status_failed"})
 		}
 
+		githubMap := fiber.Map{
+			"id":    githubUserID,
+			"login": login,
+		}
+		if avatarURL != nil && *avatarURL != "" {
+			githubMap["avatar_url"] = *avatarURL
+		}
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"linked": true,
-			"github": fiber.Map{
-				"id":    githubUserID,
-				"login": login,
-			},
+			"github": githubMap,
 		})
 	}
 }

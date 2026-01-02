@@ -1,16 +1,40 @@
-import { useState } from 'react';
-import { X, ExternalLink, User, ChevronDown, Plus, Award, Users, Star, CheckCircle, MessageSquare, Filter, Search } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, ExternalLink, User, ChevronDown, Plus, Award, Users, Star, CheckCircle, MessageSquare, Filter, Search, Loader2, AlertCircle } from 'lucide-react';
 import { useTheme } from '../../../../shared/contexts/ThemeContext';
 import { Issue } from '../../types';
-import { issuesData } from '../../data/issuesData';
 import { EmptyIssueState } from './EmptyIssueState';
 import { IssueCard } from '../../../../shared/components/ui/IssueCard';
+import { getProjectIssues } from '../../../../shared/api/client';
+
+interface Project {
+  id: string;
+  github_full_name: string;
+  status: string;
+}
 
 interface IssuesTabProps {
   onNavigate: (page: string) => void;
+  selectedProjects: Project[];
+  onRefresh?: () => void;
 }
 
-export function IssuesTab({ onNavigate }: IssuesTabProps) {
+interface IssueFromAPI {
+  github_issue_id: number;
+  number: number;
+  state: string;
+  title: string;
+  description: string | null;
+  author_login: string;
+  assignees: any[];
+  labels: any[];
+  comments_count: number;
+  comments: any[];
+  url: string;
+  updated_at: string | null;
+  last_seen_at: string;
+}
+
+export function IssuesTab({ onNavigate, selectedProjects, onRefresh }: IssuesTabProps) {
   const { theme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
@@ -27,6 +51,70 @@ export function IssuesTab({ onNavigate }: IssuesTabProps) {
   });
   const [labelSearch, setLabelSearch] = useState('');
   const [expandedApplications, setExpandedApplications] = useState<Record<string, boolean>>({});
+  const [issues, setIssues] = useState<Array<IssueFromAPI & { projectName: string; projectId: string }>>([]);
+  const [isLoadingIssues, setIsLoadingIssues] = useState(true);
+  const [issuesError, setIssuesError] = useState<string | null>(null);
+
+  // Fetch issues from selected projects
+  useEffect(() => {
+    loadIssues();
+  }, [selectedProjects]);
+
+  const loadIssues = async () => {
+    setIsLoadingIssues(true);
+    setIssuesError(null);
+    try {
+      if (selectedProjects.length === 0) {
+        setIssues([]);
+        setIsLoadingIssues(false);
+        return;
+      }
+
+      // Fetch issues from all selected projects in parallel
+      const issuePromises = selectedProjects.map(async (project: Project) => {
+        try {
+          const response = await getProjectIssues(project.id);
+          return (response.issues || []).map((issue: IssueFromAPI) => ({
+            ...issue,
+            projectName: project.github_full_name,
+            projectId: project.id,
+          }));
+        } catch (err) {
+          console.error(`Failed to fetch issues for ${project.github_full_name}:`, err);
+          return [];
+        }
+      });
+
+      const allIssues = await Promise.all(issuePromises);
+      const flattenedIssues = allIssues.flat();
+      
+      // Sort by updated_at (most recent first)
+      flattenedIssues.sort((a, b) => {
+        const dateA = a.updated_at ? new Date(a.updated_at).getTime() : new Date(a.last_seen_at).getTime();
+        const dateB = b.updated_at ? new Date(b.updated_at).getTime() : new Date(b.last_seen_at).getTime();
+        return dateB - dateA;
+      });
+
+      setIssues(flattenedIssues);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load issues';
+      setIssuesError(errorMessage);
+      setIssues([]);
+    } finally {
+      setIsLoadingIssues(false);
+    }
+  };
+
+  // Refresh issues when selectedProjects change or onRefresh is called
+  useEffect(() => {
+    if (onRefresh) {
+      // Refresh every 30 seconds
+      const interval = setInterval(() => {
+        loadIssues();
+      }, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [onRefresh, selectedProjects]);
 
   const handleProfileClick = () => {
     setSelectedIssue(null);
@@ -120,32 +208,93 @@ export function IssuesTab({ onNavigate }: IssuesTabProps) {
 
         {/* Issues List */}
         <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-custom">
-          {issuesData.map((issue) => (
-            <IssueCard
-              key={issue.id}
-              id={issue.id}
-              number={`#${issue.id}`}
-              title={issue.title}
-              repository={issue.repository || 'grainlify-core'}
-              applicants={issue.applicants}
-              author={{
-                name: issue.applicant?.name || issue.user,
-                avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'
-              }}
-              timeAgo={issue.timeAgo}
-              tags={issue.tags}
-              isSelected={selectedIssue?.id === issue.id}
-              onClick={() => setSelectedIssue(issue)}
-              showTags={true}
-            />
-          ))}
+          {isLoadingIssues ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className={`w-6 h-6 animate-spin ${isDark ? 'text-[#c9983a]' : 'text-[#c9983a]'}`} />
+            </div>
+          ) : issuesError ? (
+            <div className={`flex items-center gap-3 px-4 py-4 mx-4 rounded-[12px] ${
+              isDark
+                ? 'bg-red-500/10 border border-red-500/30 text-red-400'
+                : 'bg-red-100 border border-red-300 text-red-700'
+            }`}>
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span className="text-[14px] font-medium">{issuesError}</span>
+            </div>
+          ) : issues.length === 0 ? (
+            <div className={`px-6 py-8 text-center ${
+              isDark ? 'text-[#b8a898]' : 'text-[#7a6b5a]'
+            }`}>
+              <p className="text-[14px] font-medium mb-1">No issues found</p>
+              <p className="text-[12px]">
+                {selectedProjects.length === 0 
+                  ? 'Select repositories to view issues' 
+                  : 'No issues in selected repositories'}
+              </p>
+            </div>
+          ) : (
+            <>
+              {issues
+                .filter(issue => {
+                  // Search filter
+                  const matchesSearch = searchQuery === '' || 
+                    issue.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                    issue.author_login.toLowerCase().includes(searchQuery.toLowerCase());
+                  
+                  // Status filter
+                  const matchesStatus = selectedFilters.status.length === 0 || 
+                    selectedFilters.status.includes(issue.state);
+                  
+                  return matchesSearch && matchesStatus;
+                })
+                .map((issue) => {
+                  // Convert API issue to Issue type for compatibility
+                  const issueForCard: Issue = {
+                    id: issue.github_issue_id.toString(),
+                    title: issue.title,
+                    repository: issue.projectName,
+                    user: issue.author_login,
+                    timeAgo: issue.updated_at 
+                      ? new Date(issue.updated_at).toLocaleDateString()
+                      : 'Unknown',
+                    tags: issue.labels?.map((l: any) => l.name || l) || [],
+                    applicants: issue.comments_count || 0,
+                    applicant: null,
+                    applicationStatus: 'pending',
+                    discussions: [],
+                  };
 
-          {/* Issues Count */}
-          <div className={`text-center py-2 text-[12px] font-semibold transition-colors ${
-            isDark ? 'text-[#d4d4d4]' : 'text-[#7a6b5a]'
-          }`}>
-            {issuesData.length} issues
-          </div>
+                  return (
+                    <IssueCard
+                      key={`${issue.projectId}-${issue.github_issue_id}`}
+                      id={issue.github_issue_id.toString()}
+                      number={`#${issue.number}`}
+                      title={issue.title}
+                      repository={issue.projectName}
+                      applicants={issue.comments_count || 0}
+                      author={{
+                        name: issue.author_login,
+                        avatar: `https://github.com/${issue.author_login}.png?size=40`
+                      }}
+                      timeAgo={issue.updated_at 
+                        ? new Date(issue.updated_at).toLocaleDateString()
+                        : 'Unknown'}
+                      tags={issue.labels?.map((l: any) => l.name || l) || []}
+                      isSelected={selectedIssue?.id === issue.github_issue_id.toString()}
+                      onClick={() => setSelectedIssue(issueForCard)}
+                      showTags={true}
+                    />
+                  );
+                })}
+
+              {/* Issues Count */}
+              <div className={`text-center py-2 text-[12px] font-semibold transition-colors ${
+                isDark ? 'text-[#d4d4d4]' : 'text-[#7a6b5a]'
+              }`}>
+                {issues.length} issue{issues.length !== 1 ? 's' : ''}
+              </div>
+            </>
+          )}
         </div>
       </div>
 

@@ -1,12 +1,277 @@
+import { useEffect, useState, useMemo } from 'react';
 import { Eye, FileText, GitPullRequest, GitMerge } from 'lucide-react';
 import { useTheme } from '../../../../shared/contexts/ThemeContext';
 import { StatsCard } from './StatsCard';
 import { ActivityItem } from './ActivityItem';
 import { ApplicationsChart } from './ApplicationsChart';
 import { StatCard, Activity, ChartDataPoint } from '../../types';
+import { getProjectIssues, getProjectPRs } from '../../../../shared/api/client';
 
-export function DashboardTab() {
+interface Project {
+  id: string;
+  github_full_name: string;
+  status: string;
+}
+
+interface DashboardTabProps {
+  selectedProjects: Project[];
+  onRefresh?: () => void;
+}
+
+export function DashboardTab({ selectedProjects, onRefresh }: DashboardTabProps) {
   const { theme } = useTheme();
+  const [issues, setIssues] = useState<any[]>([]);
+  const [prs, setPrs] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch data from selected projects
+  useEffect(() => {
+    loadData();
+  }, [selectedProjects]);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      if (selectedProjects.length === 0) {
+        setIssues([]);
+        setPrs([]);
+        setIsLoading(false);
+        return;
+      }
+
+      // Fetch issues and PRs from all selected projects
+      const [issuesData, prsData] = await Promise.all([
+        Promise.all(selectedProjects.map(async (project) => {
+          try {
+            const response = await getProjectIssues(project.id);
+            return (response.issues || []).map((issue: any) => ({
+              ...issue,
+              projectName: project.github_full_name,
+            }));
+          } catch (err) {
+            console.error(`Failed to fetch issues for ${project.github_full_name}:`, err);
+            return [];
+          }
+        })),
+        Promise.all(selectedProjects.map(async (project) => {
+          try {
+            const response = await getProjectPRs(project.id);
+            return (response.prs || []).map((pr: any) => ({
+              ...pr,
+              projectName: project.github_full_name,
+            }));
+          } catch (err) {
+            console.error(`Failed to fetch PRs for ${project.github_full_name}:`, err);
+            return [];
+          }
+        })),
+      ]);
+
+      const allIssues = issuesData.flat();
+      const allPRs = prsData.flat();
+
+      // Sort by updated_at (most recent first)
+      allIssues.sort((a, b) => {
+        const dateA = a.updated_at ? new Date(a.updated_at).getTime() : new Date(a.last_seen_at).getTime();
+        const dateB = b.updated_at ? new Date(b.updated_at).getTime() : new Date(b.last_seen_at).getTime();
+        return dateB - dateA;
+      });
+
+      allPRs.sort((a, b) => {
+        const dateA = a.updated_at ? new Date(a.updated_at).getTime() : new Date(a.last_seen_at).getTime();
+        const dateB = b.updated_at ? new Date(b.updated_at).getTime() : new Date(b.last_seen_at).getTime();
+        return dateB - dateA;
+      });
+
+      setIssues(allIssues);
+      setPrs(allPRs);
+    } catch (err) {
+      console.error('Failed to load dashboard data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Refresh data periodically
+  useEffect(() => {
+    if (onRefresh) {
+      const interval = setInterval(() => {
+        loadData();
+      }, 30000); // Refresh every 30 seconds
+      return () => clearInterval(interval);
+    }
+  }, [onRefresh, selectedProjects]);
+
+  // Calculate stats from real data
+  const stats: StatCard[] = useMemo(() => {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const recentIssues = issues.filter(issue => {
+      const updatedAt = issue.updated_at ? new Date(issue.updated_at) : new Date(issue.last_seen_at);
+      return updatedAt >= sevenDaysAgo;
+    });
+
+    const recentPRs = prs.filter(pr => {
+      const updatedAt = pr.updated_at ? new Date(pr.updated_at) : new Date(pr.last_seen_at);
+      return updatedAt >= sevenDaysAgo;
+    });
+
+    const openedPRs = recentPRs.filter(pr => pr.state === 'open');
+    const mergedPRs = recentPRs.filter(pr => pr.merged === true);
+
+    return [
+      {
+        id: 1,
+        title: 'Repository Views',
+        subtitle: 'Last 7 days',
+        value: 0,
+        change: -100,
+        icon: Eye,
+      },
+      {
+        id: 2,
+        title: 'Issue Views',
+        subtitle: 'Last 7 days',
+        value: recentIssues.length,
+        change: 0,
+        icon: FileText,
+      },
+      {
+        id: 3,
+        title: 'Issue Applications',
+        subtitle: 'Last 7 days',
+        value: recentIssues.reduce((sum, issue) => sum + (issue.comments_count || 0), 0),
+        change: 0,
+        icon: FileText,
+      },
+      {
+        id: 4,
+        title: 'Pull Requests Opened',
+        subtitle: 'Last 7 days',
+        value: openedPRs.length,
+        change: openedPRs.length > 0 ? 100 : 0,
+        icon: GitPullRequest,
+      },
+      {
+        id: 5,
+        title: 'Pull Requests Merged',
+        subtitle: 'Last 7 days',
+        value: mergedPRs.length,
+        change: mergedPRs.length > 0 ? 100 : 0,
+        icon: GitMerge,
+      },
+    ];
+  }, [issues, prs]);
+
+  // Generate activity from real data
+  const activities: Activity[] = useMemo(() => {
+    const combined: Activity[] = [];
+
+    // Add recent PRs
+    prs.slice(0, 10).forEach(pr => {
+      combined.push({
+        id: pr.github_pr_id,
+        type: 'pr',
+        number: pr.number,
+        title: pr.title,
+        label: pr.merged ? 'Merged' : pr.state === 'open' ? 'Open' : 'Closed',
+        timeAgo: pr.updated_at 
+          ? formatTimeAgo(new Date(pr.updated_at))
+          : formatTimeAgo(new Date(pr.last_seen_at)),
+      });
+    });
+
+    // Add recent issues
+    issues.slice(0, 10).forEach(issue => {
+      combined.push({
+        id: issue.github_issue_id,
+        type: 'issue',
+        number: issue.number,
+        title: issue.title,
+        label: issue.comments_count > 0 ? `${issue.comments_count} comment${issue.comments_count !== 1 ? 's' : ''}` : null,
+        timeAgo: issue.updated_at 
+          ? formatTimeAgo(new Date(issue.updated_at))
+          : formatTimeAgo(new Date(issue.last_seen_at)),
+      });
+    });
+
+    // Sort by time (most recent first)
+    combined.sort((a, b) => {
+      const timeA = parseTimeAgo(a.timeAgo);
+      const timeB = parseTimeAgo(b.timeAgo);
+      return timeB - timeA;
+    });
+
+    return combined.slice(0, 5); // Top 5 most recent
+  }, [issues, prs]);
+
+  // Helper function to format time ago
+  const formatTimeAgo = (date: Date): string => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    const diffMonths = Math.floor(diffDays / 30);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+    if (diffDays < 30) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+    return `${diffMonths} month${diffMonths !== 1 ? 's' : ''} ago`;
+  };
+
+  // Helper function to parse time ago for sorting
+  const parseTimeAgo = (timeAgo: string): number => {
+    const now = new Date().getTime();
+    if (timeAgo.includes('minute')) {
+      const mins = parseInt(timeAgo) || 0;
+      return now - mins * 60000;
+    }
+    if (timeAgo.includes('hour')) {
+      const hours = parseInt(timeAgo) || 0;
+      return now - hours * 3600000;
+    }
+    if (timeAgo.includes('day')) {
+      const days = parseInt(timeAgo) || 0;
+      return now - days * 86400000;
+    }
+    if (timeAgo.includes('month')) {
+      const months = parseInt(timeAgo) || 0;
+      return now - months * 30 * 86400000;
+    }
+    return now;
+  };
+
+  // Generate chart data from real data (last 6 months)
+  const chartData: ChartDataPoint[] = useMemo(() => {
+    const months = ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'];
+    const now = new Date();
+    
+    return months.map((month, index) => {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() - (4 - index), 1);
+
+      const monthIssues = issues.filter(issue => {
+        const createdAt = issue.updated_at ? new Date(issue.updated_at) : new Date(issue.last_seen_at);
+        return createdAt >= monthDate && createdAt < nextMonth;
+      });
+
+      const monthPRs = prs.filter(pr => {
+        const createdAt = pr.updated_at ? new Date(pr.updated_at) : new Date(pr.last_seen_at);
+        return createdAt >= monthDate && createdAt < nextMonth;
+      });
+
+      const mergedPRs = monthPRs.filter(pr => pr.merged);
+
+      return {
+        month,
+        applications: monthIssues.reduce((sum, issue) => sum + (issue.comments_count || 0), 0),
+        merged: mergedPRs.length,
+      };
+    });
+  }, [issues, prs]);
   // Stats data
   const stats: StatCard[] = [
     {

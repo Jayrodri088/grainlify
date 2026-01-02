@@ -135,14 +135,8 @@ func main() {
 			_ = worker.Run(context.Background())
 		}()
 
-		// Start GitHub App cleanup worker (checks for uninstalled apps)
-		if cfg.GitHubAppID != "" && cfg.GitHubAppPrivateKey != "" {
-			slog.Info("step", "8.1", "action", "starting_github_app_cleanup_worker")
-			cleanupHandler := handlers.NewGitHubAppCleanupHandler(cfg, database.Pool)
-			go func() {
-				cleanupHandler.RunPeriodicCleanup(context.Background())
-			}()
-		}
+		// GitHub App cleanup is now handled via webhooks (installation.deleted events)
+		// No need for periodic polling
 	} else {
 		slog.Info("step", "8", "action", "background_worker_skipped",
 			"reason", func() string {

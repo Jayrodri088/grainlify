@@ -27,7 +27,12 @@ interface Project {
   status: string;
 }
 
-export function PullRequestsTab() {
+interface PullRequestsTabProps {
+  selectedProjects: Project[];
+  onRefresh?: () => void;
+}
+
+export function PullRequestsTab({ selectedProjects, onRefresh }: PullRequestsTabProps) {
   const { theme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<PRFilterType>('All states');
@@ -36,29 +41,23 @@ export function PullRequestsTab() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch PRs from all projects
+  // Fetch PRs from selected projects
   useEffect(() => {
     loadPRs();
-  }, []);
+  }, [selectedProjects]);
 
   const loadPRs = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      // Get all projects
-      const projects = await getMyProjects();
-      
-      // Only fetch from verified projects
-      const verifiedProjects = projects.filter((p: Project) => p.status === 'verified');
-      
-      if (verifiedProjects.length === 0) {
+      if (selectedProjects.length === 0) {
         setPrs([]);
         setIsLoading(false);
         return;
       }
 
-      // Fetch PRs from all verified projects in parallel
-      const prPromises = verifiedProjects.map(async (project: Project) => {
+      // Fetch PRs from all selected projects in parallel
+      const prPromises = selectedProjects.map(async (project: Project) => {
         try {
           const response = await getProjectPRs(project.id);
           return (response.prs || []).map((pr: PRFromAPI) => ({
@@ -90,6 +89,9 @@ export function PullRequestsTab() {
       setIsLoading(false);
     }
   };
+
+  // Refresh PRs when selectedProjects change
+  // Note: onRefresh is available but we refresh based on selectedProjects changes
 
   // Filter PRs based on search and filter
   const filteredPRs = prs.filter(pr => {
@@ -259,9 +261,20 @@ export function PullRequestsTab() {
           })
         ) : (
           <div className="text-center py-12">
-            <p className={`text-[14px] transition-colors ${
+            <p className={`text-[14px] font-medium mb-1 transition-colors ${
               theme === 'dark' ? 'text-[#b8a898]' : 'text-[#7a6b5a]'
-            }`}>No pull requests found</p>
+            }`}>
+              {selectedProjects.length === 0 
+                ? 'Select repositories to view pull requests' 
+                : 'No pull requests found in selected repositories'}
+            </p>
+            {selectedProjects.length === 0 && (
+              <p className={`text-[12px] transition-colors ${
+                theme === 'dark' ? 'text-[#8a7b6a]' : 'text-[#9a8b7a]'
+              }`}>
+                Use the repository selector above to choose which repositories to view
+              </p>
+            )}
           </div>
         )}
       </div>

@@ -41,13 +41,30 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedRepoIds, setSelectedRepoIds] = useState<Set<string>>(new Set());
 
   const tabs: TabType[] = ['Dashboard', 'Issues', 'Pull Requests'];
 
   // Fetch projects from API
   useEffect(() => {
     loadProjects();
+    
+    // Check if we're returning from GitHub App installation
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('github_app_installed') === 'true') {
+      // Refresh projects after a short delay to allow backend to sync
+      setTimeout(() => {
+        loadProjects();
+      }, 3000); // Increased delay to allow backend sync to complete
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
+
+  // Expose refresh function for child components
+  const refreshAll = () => {
+    loadProjects();
+  };
 
   const loadProjects = async () => {
     setIsLoading(true);
@@ -113,6 +130,28 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
       return next;
     });
   };
+
+  // Toggle repository selection
+  const toggleRepoSelection = (repoId: string) => {
+    setSelectedRepoIds(prev => {
+      const next = new Set(prev);
+      if (next.has(repoId)) {
+        next.delete(repoId);
+      } else {
+        next.add(repoId);
+      }
+      return next;
+    });
+  };
+
+  // Get selected projects
+  const selectedProjects = useMemo(() => {
+    if (selectedRepoIds.size === 0) {
+      // If no repos selected, return all verified projects
+      return projects.filter(p => p.status === 'verified');
+    }
+    return projects.filter(p => selectedRepoIds.has(p.id) && p.status === 'verified');
+  }, [projects, selectedRepoIds]);
 
   return (
     <div className="space-y-6">
@@ -233,6 +272,8 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
                                 >
                                   <input
                                     type="checkbox"
+                                    checked={selectedRepoIds.has(repo.id)}
+                                    onChange={() => toggleRepoSelection(repo.id)}
                                     className={`w-[18px] h-[18px] rounded-[4px] border-2 checked:bg-[#c9983a] checked:border-[#c9983a] focus:ring-2 focus:ring-[#c9983a]/40 transition-all cursor-pointer appearance-none checked:after:content-['✓'] checked:after:text-white checked:after:text-[12px] checked:after:flex checked:after:items-center checked:after:justify-center checked:after:font-bold ${
                                       theme === 'dark'
                                         ? 'border-[#b8a898]/50 bg-[#2d2820]'
@@ -343,17 +384,17 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'Dashboard' && <DashboardTab />}
+      {activeTab === 'Dashboard' && <DashboardTab selectedProjects={selectedProjects} onRefresh={refreshAll} />}
       
-      {activeTab === 'Issues' && <IssuesTab onNavigate={onNavigate} />}
+      {activeTab === 'Issues' && <IssuesTab onNavigate={onNavigate} selectedProjects={selectedProjects} onRefresh={refreshAll} />}
       
-      {activeTab === 'Pull Requests' && <PullRequestsTab />}
+      {activeTab === 'Pull Requests' && <PullRequestsTab selectedProjects={selectedProjects} onRefresh={refreshAll} />}
 
       {/* Install GitHub App Modal */}
       <InstallGitHubAppModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        onSuccess={loadProjects}
+        onSuccess={refreshAll}
       />
     </div>
   );

@@ -109,8 +109,8 @@ func New(cfg config.Config, deps Deps) *fiber.App {
 			"remote_ip", c.IP(),
 		)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "webhook_url_misconfigured",
-			"message": "Webhook requests should be sent to /webhooks/github, not /",
+			"error":       "webhook_url_misconfigured",
+			"message":     "Webhook requests should be sent to /webhooks/github, not /",
 			"correct_url": "/webhooks/github",
 		})
 	})

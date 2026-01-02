@@ -390,10 +390,10 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
                 className={`px-5 py-3 rounded-[14px] text-[14px] font-semibold transition-all ${
                   activeTab === tab
                     ? theme === 'dark'
-                      ? 'bg-gradient-to-br from-[#c9983a]/40 via-[#d4af37]/35 to-[#c9983a]/30 border-2 border-[#c9983a]/70 text-[#fef5e7] shadow-[0_4px_16px_rgba(201,152,58,0.4)]'
-                      : 'bg-gradient-to-br from-[#c9983a]/30 via-[#d4af37]/25 to-[#c9983a]/20 border-2 border-[#c9983a]/50 text-[#2d2820] shadow-[0_4px_16px_rgba(201,152,58,0.25)]'
+                      ? 'bg-gradient-to-br from-[#c9983a]/40 via-[#d4af37]/35 to-[#c9983a]/30 border-2 border-[#c9983a]/70 text-[#fef5e7]'
+                      : 'bg-gradient-to-br from-[#c9983a]/30 via-[#d4af37]/25 to-[#c9983a]/20 border-2 border-[#c9983a]/50 text-[#2d2820]'
                     : theme === 'dark'
-                      ? 'text-white bg-white/[0.15] border-2 border-white/25 hover:bg-white/[0.25] hover:border-white/40 hover:shadow-[0_4px_12px_rgba(255,255,255,0.15)]'
+                      ? 'text-white bg-white/[0.15] border-2 border-white/25 hover:bg-white/[0.25] hover:border-white/40'
                       : 'text-[#7a6b5a] hover:text-[#2d2820] hover:bg-white/[0.1] border-2 border-transparent'
                 }`}
               >

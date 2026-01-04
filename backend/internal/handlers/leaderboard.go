@@ -180,4 +180,3 @@ LIMIT $1
 		return c.Status(fiber.StatusOK).JSON(leaderboard)
 	}
 }
-

@@ -432,6 +432,11 @@ export function Dashboard() {
                       setCurrentPage('leaderboard');
                       window.history.replaceState({}, '', '/dashboard?page=leaderboard');
                     }}
+                    onIssueClick={(issueId, projectId) => {
+                      setSelectedProjectId(projectId);
+                      setSelectedIssueId(issueId);
+                      setCurrentPage('discover');
+                    }}
                   />
                 )}
                 {currentPage === 'data' && activeRole === 'admin' && <DataPage />}

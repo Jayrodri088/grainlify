@@ -173,6 +173,7 @@ export const getProfileActivity = (limit = 50, offset = 0, userId?: string, logi
       number: number;
       title: string;
       url: string;
+      state?: string;
       date: string;
       month_year: string;
       project_name: string;

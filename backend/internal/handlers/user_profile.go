@@ -514,6 +514,7 @@ SELECT
   i.title,
   i.url,
   i.created_at_github,
+  i.state,
   p.github_full_name as project_name,
   p.id as project_id
 FROM github_issues i
@@ -529,6 +530,7 @@ SELECT
   pr.title,
   pr.url,
   pr.created_at_github,
+  pr.state,
   p.github_full_name as project_name,
   p.id as project_id
 FROM github_pull_requests pr
@@ -549,11 +551,11 @@ LIMIT $2 OFFSET $3
 			var contribType string
 			var id uuid.UUID
 			var number int
-			var title, url, projectName string
+			var title, url, state, projectName string
 			var projectID uuid.UUID
 			var createdAt *time.Time
 
-			if err := rows.Scan(&contribType, &id, &number, &title, &url, &createdAt, &projectName, &projectID); err != nil {
+			if err := rows.Scan(&contribType, &id, &number, &title, &url, &createdAt, &state, &projectName, &projectID); err != nil {
 				slog.Error("failed to scan activity row", "error", err)
 				continue
 			}
@@ -572,6 +574,7 @@ LIMIT $2 OFFSET $3
 				"number":       number,
 				"title":        title,
 				"url":          url,
+				"state":        state,
 				"date":         dateStr,
 				"month_year":   monthYear,
 				"project_name": projectName,

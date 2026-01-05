@@ -45,9 +45,10 @@ interface ProfilePageProps {
   viewingUserId?: string | null;
   viewingUserLogin?: string | null;
   onBack?: () => void;
+  onIssueClick?: (issueId: string, projectId: string) => void;
 }
 
-export function ProfilePage({ viewingUserId, viewingUserLogin, onBack }: ProfilePageProps) {
+export function ProfilePage({ viewingUserId, viewingUserLogin, onBack, onIssueClick }: ProfilePageProps) {
   const { theme } = useTheme();
   const { user, userRole } = useAuth();
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
@@ -60,6 +61,7 @@ export function ProfilePage({ viewingUserId, viewingUserLogin, onBack }: Profile
     number: number;
     title: string;
     url: string;
+    state?: string;
     date: string;
     month_year: string;
     project_name: string;
@@ -235,9 +237,14 @@ export function ProfilePage({ viewingUserId, viewingUserLogin, onBack }: Profile
     };
   }) || [];
 
-  // Group contribution activity by month
+  // Group contribution activity by month, filtering to only show open issues
   const contributionsByMonth: { [key: string]: any[] } = {};
   contributionActivity.forEach((activity) => {
+    // Only include issues if they are open, or include all PRs
+    if (activity.type === 'issue' && activity.state !== 'open') {
+      return; // Skip closed issues
+    }
+    
     const month = activity.month_year || 'Unknown';
     if (!contributionsByMonth[month]) {
       contributionsByMonth[month] = [];
@@ -249,6 +256,7 @@ export function ProfilePage({ viewingUserId, viewingUserLogin, onBack }: Profile
       badgeColor: activity.type === 'issue' ? '#c9983a' : '#d4af37',
       title: activity.title,
       project: activity.project_name,
+      project_id: activity.project_id,
       date: new Date(activity.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }),
       url: activity.url,
     });
@@ -358,7 +366,7 @@ export function ProfilePage({ viewingUserId, viewingUserLogin, onBack }: Profile
                       >
                         {profileData.website.replace(/^https?:\/\//, '').replace(/^www\./, '')}
                       </a>
-                    </div>
+                </div>
                   )}
                 </div>
               )}
@@ -381,14 +389,14 @@ export function ProfilePage({ viewingUserId, viewingUserLogin, onBack }: Profile
                     </a>
                   ) : (
                     <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center cursor-not-allowed ${
-                      theme === 'dark' 
+                  theme === 'dark'
                         ? 'bg-gradient-to-br from-gray-400/20 to-gray-500/10 border-gray-400/30 opacity-40' 
                         : 'bg-gradient-to-br from-gray-300/40 to-gray-400/30 border-gray-400/50 opacity-60'
                     }`} title="Telegram">
                       <svg className={`w-4 h-4 ${theme === 'dark' ? 'fill-[#9ca3af]' : 'fill-[#6b7280]'}`} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                         <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
                       </svg>
-                    </div>
+              </div>
                   )}
                   
                   {/* LinkedIn */}
@@ -492,7 +500,7 @@ export function ProfilePage({ viewingUserId, viewingUserLogin, onBack }: Profile
                   )}
                 </div>
               )}
-              
+
               {/* Stats Grid - Inline Premium Style */}
               <div className="space-y-4 mb-6">
                 {/* Row 1 - Contributions & Rewards */}
@@ -1296,7 +1304,16 @@ export function ProfilePage({ viewingUserId, viewingUserLogin, onBack }: Profile
                           <div className="absolute left-[20px] top-[36px] bottom-[-8px] w-[2px] bg-gradient-to-b from-white/25 to-white/8" />
                         )}
 
-                        <div className="flex items-center gap-4 py-2.5 hover:bg-white/[0.08] -mx-2 px-2 rounded-lg transition-all cursor-pointer group/item">
+                        <div 
+                          onClick={() => {
+                            if (item.type === 'issue' && onIssueClick) {
+                              onIssueClick(item.id, item.project_id);
+                            }
+                          }}
+                          className={`flex items-center gap-4 py-2.5 hover:bg-white/[0.08] -mx-2 px-2 rounded-lg transition-all group/item ${
+                            item.type === 'issue' ? 'cursor-pointer' : 'cursor-default'
+                          }`}
+                        >
                           {/* Icon + Number Badge (only for issues and PRs) */}
                           {item.type !== 'review' && IconComponent && (
                             <div className="relative z-10 flex items-center gap-2.5 flex-shrink-0">

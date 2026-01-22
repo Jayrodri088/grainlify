@@ -105,8 +105,35 @@ export function ProfileTab() {
   };
 
   const handleInputChange = (platform: string, value: string, setter: (val: string) => void) => {
-    setter(value);
-    const error = validateHandle(platform, value);
+    // Robust extraction logic
+    let sanitizedValue = value;
+
+    // 1. Remove protocol (http://, https://)
+    sanitizedValue = sanitizedValue.replace(/^https?:\/\//, '');
+
+    // 2. Remove domain and everything before the username path
+    // Matches common domains like www.linkedin.com/in/, twitter.com/, etc.
+    // Also matches generic domains if followed by a slash
+    sanitizedValue = sanitizedValue.replace(/^(?:www\.)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\/(?:in\/|user\/|@\/)?/, '');
+
+    // 3. Remove generic prefixes if they weren't part of a domain
+    // e.g. /in/username, @username
+    sanitizedValue = sanitizedValue.replace(/^@/, '');
+    sanitizedValue = sanitizedValue.replace(/^\//, '');
+
+    // 4. Extract the last segment if there are still slashes (e.g. some/path/username)
+    if (sanitizedValue.includes('/')) {
+      const parts = sanitizedValue.split('/').filter(part => part.length > 0);
+      if (parts.length > 0) {
+        sanitizedValue = parts[parts.length - 1];
+      }
+    }
+
+    // 5. Remove any trailing slash (just in case)
+    sanitizedValue = sanitizedValue.replace(/\/$/, '');
+
+    setter(sanitizedValue);
+    const error = validateHandle(platform, sanitizedValue);
     setErrors(prev => ({
       ...prev,
       [platform]: error
@@ -338,8 +365,8 @@ export function ProfileTab() {
     <div className="space-y-6">
       {/* Profile Header */}
       <div className={`backdrop-blur-[40px] rounded-[24px] border shadow-[0_8px_32px_rgba(0,0,0,0.08)] p-8 transition-colors ${theme === 'dark'
-          ? 'bg-[#2d2820]/[0.4] border-white/10'
-          : 'bg-white/[0.12] border-white/20'
+        ? 'bg-[#2d2820]/[0.4] border-white/10'
+        : 'bg-white/[0.12] border-white/20'
         }`}>
         <h2 className={`text-[28px] font-bold mb-2 transition-colors ${theme === 'dark' ? 'text-[#f5efe5]' : 'text-[#2d2820]'
           }`}>Profile</h2>
@@ -349,8 +376,8 @@ export function ProfileTab() {
 
       {/* GitHub Account Section */}
       <div className={`backdrop-blur-[40px] rounded-[24px] border shadow-[0_8px_32px_rgba(0,0,0,0.08)] p-8 transition-colors ${theme === 'dark'
-          ? 'bg-[#2d2820]/[0.4] border-white/10'
-          : 'bg-white/[0.12] border-white/20'
+        ? 'bg-[#2d2820]/[0.4] border-white/10'
+        : 'bg-white/[0.12] border-white/20'
         }`}>
         <h3 className={`text-[20px] font-bold mb-2 transition-colors ${theme === 'dark' ? 'text-[#f5efe5]' : 'text-[#2d2820]'
           }`}>GitHub account</h3>
@@ -360,8 +387,8 @@ export function ProfileTab() {
         </p>
 
         <div className={`flex items-center justify-between p-4 rounded-[16px] backdrop-blur-[30px] border transition-colors ${theme === 'dark'
-            ? 'bg-[#3d342c]/[0.4] border-white/15'
-            : 'bg-white/[0.15] border-white/25'
+          ? 'bg-[#3d342c]/[0.4] border-white/15'
+          : 'bg-white/[0.15] border-white/25'
           }`}>
           <span className={`text-[15px] font-medium transition-colors ${theme === 'dark' ? 'text-[#d4c5b0]' : 'text-[#2d2820]'
             }`}>
@@ -378,8 +405,8 @@ export function ProfileTab() {
               onClick={handleResync}
               disabled={isResyncing || !currentUser?.github}
               className={`px-5 py-2.5 rounded-[12px] backdrop-blur-[30px] border font-medium text-[14px] hover:bg-white/[0.25] transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${theme === 'dark'
-                  ? 'bg-[#3d342c]/[0.5] border-white/20 text-[#d4c5b0]'
-                  : 'bg-white/[0.2] border-white/30 text-[#2d2820]'
+                ? 'bg-[#3d342c]/[0.5] border-white/20 text-[#d4c5b0]'
+                : 'bg-white/[0.2] border-white/30 text-[#2d2820]'
                 }`}
             >
               <Github className="w-4 h-4" />
@@ -397,8 +424,8 @@ export function ProfileTab() {
 
       {/* Profile Picture */}
       <div className={`backdrop-blur-[40px] rounded-[24px] border shadow-[0_8px_32px_rgba(0,0,0,0.08)] p-8 transition-colors ${theme === 'dark'
-          ? 'bg-[#2d2820]/[0.4] border-white/10'
-          : 'bg-white/[0.12] border-white/20'
+        ? 'bg-[#2d2820]/[0.4] border-white/10'
+        : 'bg-white/[0.12] border-white/20'
         }`}>
         <h3 className={`text-[16px] font-bold mb-1 transition-colors ${theme === 'dark' ? 'text-[#f5efe5]' : 'text-[#2d2820]'
           }`}>Profile Picture</h3>
@@ -429,8 +456,8 @@ export function ProfileTab() {
           <button
             onClick={() => fileInputRef.current?.click()}
             className={`px-5 py-2.5 rounded-[12px] backdrop-blur-[30px] border font-medium text-[14px] hover:bg-white/[0.2] transition-all flex items-center gap-2 ${theme === 'dark'
-                ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#d4c5b0]'
-                : 'bg-white/[0.15] border-white/25 text-[#2d2820]'
+              ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#d4c5b0]'
+              : 'bg-white/[0.15] border-white/25 text-[#2d2820]'
               }`}
           >
             <Upload className="w-4 h-4" />
@@ -450,8 +477,8 @@ export function ProfileTab() {
 
       {/* Personal Information */}
       <div className={`backdrop-blur-[40px] rounded-[24px] border shadow-[0_8px_32px_rgba(0,0,0,0.08)] p-8 transition-colors ${theme === 'dark'
-          ? 'bg-[#2d2820]/[0.4] border-white/10'
-          : 'bg-white/[0.12] border-white/20'
+        ? 'bg-[#2d2820]/[0.4] border-white/10'
+        : 'bg-white/[0.12] border-white/20'
         }`}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* First Name */}
@@ -464,8 +491,8 @@ export function ProfileTab() {
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
               className={`w-full px-4 py-3 rounded-[14px] backdrop-blur-[30px] border focus:outline-none focus:bg-white/[0.2] focus:border-[#c9983a]/30 transition-all text-[14px] ${theme === 'dark'
-                  ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
-                  : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
+                ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
+                : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
                 }`}
             />
           </div>
@@ -480,8 +507,8 @@ export function ProfileTab() {
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
               className={`w-full px-4 py-3 rounded-[14px] backdrop-blur-[30px] border focus:outline-none focus:bg-white/[0.2] focus:border-[#c9983a]/30 transition-all text-[14px] ${theme === 'dark'
-                  ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
-                  : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
+                ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
+                : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
                 }`}
             />
           </div>
@@ -496,8 +523,8 @@ export function ProfileTab() {
               value={location}
               onChange={(e) => setLocation(e.target.value)}
               className={`w-full px-4 py-3 rounded-[14px] backdrop-blur-[30px] border focus:outline-none focus:bg-white/[0.2] focus:border-[#c9983a]/30 transition-all text-[14px] ${theme === 'dark'
-                  ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
-                  : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
+                ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
+                : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
                 }`}
             />
           </div>
@@ -512,8 +539,8 @@ export function ProfileTab() {
               value={website}
               onChange={(e) => setWebsite(e.target.value)}
               className={`w-full px-4 py-3 rounded-[14px] backdrop-blur-[30px] border focus:outline-none focus:bg-white/[0.2] focus:border-[#c9983a]/30 transition-all text-[14px] ${theme === 'dark'
-                  ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
-                  : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
+                ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
+                : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
                 }`}
             />
           </div>
@@ -529,8 +556,8 @@ export function ProfileTab() {
             value={bio}
             onChange={(e) => setBio(e.target.value)}
             className={`w-full px-4 py-3 rounded-[14px] backdrop-blur-[30px] border focus:outline-none focus:bg-white/[0.2] focus:border-[#c9983a]/30 transition-all text-[14px] resize-none ${theme === 'dark'
-                ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
-                : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
+              ? 'bg-[#3d342c]/[0.4] border-white/15 text-[#f5efe5] placeholder-[#b8a898]'
+              : 'bg-white/[0.15] border-white/25 text-[#2d2820] placeholder-[#7a6b5a]'
               }`}
           />
         </div>
@@ -538,8 +565,8 @@ export function ProfileTab() {
 
       {/* Contact Information */}
       <div className={`backdrop-blur-[40px] rounded-[24px] border shadow-[0_8px_32px_rgba(0,0,0,0.08)] p-8 transition-colors ${theme === 'dark'
-          ? 'bg-[#2d2820]/[0.4] border-white/10'
-          : 'bg-white/[0.12] border-white/20'
+        ? 'bg-[#2d2820]/[0.4] border-white/10'
+        : 'bg-white/[0.12] border-white/20'
         }`}>
         <h3 className={`text-[20px] font-bold mb-2 transition-colors ${theme === 'dark' ? 'text-[#f5efe5]' : 'text-[#2d2820]'
           }`}>Contact Information</h3>

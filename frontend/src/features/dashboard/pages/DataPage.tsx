@@ -509,7 +509,7 @@ export function DataPage() {
               </div>
               <div className="w-10 h-10 md:w-8 md:h-8 rounded-[8px] backdrop-blur-[25px] bg-white/[0.2] border border-white/30 flex items-center justify-center text-white font-bold text-[14px] md:text-[11px] hover:bg-white/[0.3] active:bg-white/[0.4] transition-all cursor-pointer touch-manipulation">
                 −
-              </button>
+              </div>
             </div>
           </div>
 

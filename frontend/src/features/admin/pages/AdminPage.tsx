@@ -246,6 +246,7 @@ export function AdminPage() {
   const handleCreateOsw = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Validate all fields
     const titleError = validateOswTitle(oswForm.title);
     const descError = validateOswDescription(oswForm.description);
     const locError = validateOswLocation(oswForm.location);
@@ -270,6 +271,7 @@ export function AdminPage() {
     if (endDateError) newErrors.endDate = endDateError;
     if (endTimeError) newErrors.endTime = endTimeError;
 
+    // Cross-field validation
     const dateRangeErrors = validateOswDateRange(
       oswForm.startDate,
       oswForm.startTime,
@@ -285,10 +287,12 @@ export function AdminPage() {
     }
 
     setIsSubmitting(true);
+
     try {
       setErrorMessage(null);
       const start_at = new Date(`${oswForm.startDate}T${oswForm.startTime}:00.000Z`).toISOString();
       const end_at = new Date(`${oswForm.endDate}T${oswForm.endTime}:00.000Z`).toISOString();
+      
       await createOpenSourceWeekEvent({
         title: oswForm.title,
         description: oswForm.description || undefined,
@@ -297,7 +301,10 @@ export function AdminPage() {
         start_at,
         end_at,
       });
+
+      // Success - close modal and reset form
       setShowAddOswModal(false);
+      setOswErrors({});
       setOswForm({
         title: '',
         description: '',
@@ -308,7 +315,8 @@ export function AdminPage() {
         endDate: '',
         endTime: '00:00',
       });
-      setOswErrors({});
+
+      // Refresh events list
       await fetchOswEvents();
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to create event.');
@@ -812,7 +820,7 @@ export function AdminPage() {
         </form>
       </Modal>
 
-      {/* Add Open Source Week Event Modal */}
+      {/* Add Open Source Week Event Modal - UPDATED */}
       <Modal
         isOpen={showAddOswModal}
         onClose={() => {
@@ -823,6 +831,9 @@ export function AdminPage() {
         icon={<Calendar className="w-6 h-6 text-[#c9983a]" />}
         width="lg"
       >
+        <p className={`text-[14px] mb-6 transition-colors ${theme === 'dark' ? 'text-[#d4d4d4]' : 'text-[#7a6b5a]'
+          }`}>Create a new Open-Source Week event</p>
+
         <form onSubmit={handleCreateOsw}>
           <div className="space-y-4">
             <ModalInput
@@ -840,6 +851,7 @@ export function AdminPage() {
               required
               error={oswErrors.title}
             />
+
             <ModalInput
               label="Description"
               value={oswForm.description}
@@ -855,6 +867,7 @@ export function AdminPage() {
               rows={3}
               error={oswErrors.description}
             />
+
             <ModalInput
               label="Location"
               value={oswForm.location}
@@ -869,13 +882,11 @@ export function AdminPage() {
               placeholder="Worldwide"
               error={oswErrors.location}
             />
+
             <ModalSelect
               label="Status"
               value={oswForm.status}
-              onChange={(value) => {
-                setOswForm({ ...oswForm, status: value });
-                if (oswErrors.status) setOswErrors({ ...oswErrors, status: '' });
-              }}
+              onChange={(value) => setOswForm({ ...oswForm, status: value })}
               options={[
                 { value: 'upcoming', label: 'Upcoming' },
                 { value: 'running', label: 'Running' },
@@ -883,6 +894,7 @@ export function AdminPage() {
                 { value: 'draft', label: 'Draft (hidden from public)' },
               ]}
             />
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <DatePicker
                 label="Start date (UTC)"
@@ -890,10 +902,6 @@ export function AdminPage() {
                 onChange={(value) => {
                   setOswForm({ ...oswForm, startDate: value });
                   if (oswErrors.startDate) setOswErrors({ ...oswErrors, startDate: '' });
-                }}
-                onBlur={() => {
-                  const error = validateOswStartDate(oswForm.startDate);
-                  if (error) setOswErrors(prev => ({ ...prev, startDate: error }));
                 }}
                 placeholder="Select start date"
                 required
@@ -915,6 +923,7 @@ export function AdminPage() {
                 error={oswErrors.startTime}
               />
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <DatePicker
                 label="End date (UTC)"
@@ -922,20 +931,6 @@ export function AdminPage() {
                 onChange={(value) => {
                   setOswForm({ ...oswForm, endDate: value });
                   if (oswErrors.endDate) setOswErrors({ ...oswErrors, endDate: '' });
-                }}
-                onBlur={() => {
-                  const error = validateOswEndDate(oswForm.endDate, oswForm.startDate);
-                  if (error) setOswErrors(prev => ({ ...prev, endDate: error }));
-                  
-                  const rangeErrors = validateOswDateRange(
-                    oswForm.startDate,
-                    oswForm.startTime,
-                    oswForm.endDate,
-                    oswForm.endTime
-                  );
-                  if (Object.keys(rangeErrors).length > 0) {
-                    setOswErrors(prev => ({ ...prev, ...rangeErrors }));
-                  }
                 }}
                 placeholder="Select end date"
                 required
@@ -957,34 +952,21 @@ export function AdminPage() {
                     oswForm.startDate
                   );
                   if (error) setOswErrors(prev => ({ ...prev, endTime: error }));
-                  
-                  const rangeErrors = validateOswDateRange(
-                    oswForm.startDate,
-                    oswForm.startTime,
-                    oswForm.endDate,
-                    oswForm.endTime
-                  );
-                  if (Object.keys(rangeErrors).length > 0) {
-                    setOswErrors(prev => ({ ...prev, ...rangeErrors }));
-                  }
                 }}
                 required
                 error={oswErrors.endTime}
               />
             </div>
           </div>
+
           <ModalFooter>
             <ModalButton onClick={() => {
               setShowAddOswModal(false);
               setOswErrors({});
-            }} disabled={isSubmitting}>
+            }}>
               Cancel
             </ModalButton>
-            <ModalButton 
-              type="submit" 
-              variant="primary" 
-              disabled={isSubmitting || Object.keys(oswErrors).length > 0}
-            >
+            <ModalButton type="submit" variant="primary" disabled={isSubmitting}>
               <Plus className="w-4 h-4" />
               {isSubmitting ? 'Creating...' : 'Create Event'}
             </ModalButton>

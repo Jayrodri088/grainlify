@@ -148,11 +148,11 @@ impl BountyEscrowContract {
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
 
-        // Transfer funds to contributor
-        client.transfer(&env.current_contract_address(), &contributor, &escrow.amount);
-
         escrow.status = EscrowStatus::Released;
         env.storage().persistent().set(&DataKey::Escrow(bounty_id), &escrow);
+
+        // Transfer funds to contributor
+        client.transfer(&env.current_contract_address(), &contributor, &escrow.amount);
 
         emit_funds_released(
             &env,
@@ -194,11 +194,11 @@ impl BountyEscrowContract {
         let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let client = token::Client::new(&env, &token_addr);
 
-        // Transfer funds back to depositor
-        client.transfer(&env.current_contract_address(), &escrow.depositor, &escrow.amount);
-
         escrow.status = EscrowStatus::Refunded;
         env.storage().persistent().set(&DataKey::Escrow(bounty_id), &escrow);
+
+        // Transfer funds back to depositor
+        client.transfer(&env.current_contract_address(), &escrow.depositor, &escrow.amount);
 
         emit_funds_refunded(
             &env,

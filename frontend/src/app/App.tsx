@@ -31,7 +31,7 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <Dashboard />
-                  </ProtectedRoute>
+              </ProtectedRoute>
                 }
               />
             </Routes>

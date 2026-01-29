@@ -4,6 +4,7 @@
  */
 
 import { API_BASE_URL } from "../config/api";
+import { SearchResults } from "../types/search";
 
 // Token management
 export const getAuthToken = (): string | null => {
@@ -167,6 +168,10 @@ export type LandingStats = {
 
 export const getLandingStats = () => apiRequest<LandingStats>("/stats/landing");
 
+// Search
+export const search = (query: string) =>
+  apiRequest<SearchResults>(`/search?q=${encodeURIComponent(query)}`);
+
 // Authentication
 export const getCurrentUser = () =>
   apiRequest<{
@@ -209,7 +214,10 @@ export const resyncGitHubProfile = () =>
   }>("/me/github/resync", { requiresAuth: true, method: "POST" });
 
 export const getGitHubLoginUrl = () => {
-  return `${API_BASE_URL}/auth/github/login/start`;
+  // Pass the current frontend origin as redirect parameter
+  // This allows the backend to redirect back to the correct frontend after OAuth
+  const redirectAfterLogin = window.location.origin;
+  return `${API_BASE_URL}/auth/github/login/start?redirect=${encodeURIComponent(redirectAfterLogin)}`;
 };
 
 export const getGitHubStatus = () =>
@@ -565,6 +573,12 @@ export const deleteOpenSourceWeekEvent = (id: string) =>
     method: "DELETE",
   });
 
+export const deleteAdminProject = (id: string) =>
+  apiRequest<{ ok: boolean }>(`/admin/projects/${id}`, {
+    requiresAuth: true,
+    method: "DELETE",
+  });
+
 export const createEcosystem = (data: {
   name: string;
   description?: string;
@@ -613,6 +627,29 @@ export const deleteEcosystem = (id: string) =>
   }>(`/admin/ecosystems/${id}`, {
     requiresAuth: true,
     method: "DELETE",
+  });
+
+export const updateEcosystem = (id: string, data: {
+  name: string;
+  description?: string;
+  website_url?: string;
+  status: 'active' | 'inactive';
+}) =>
+  apiRequest<{
+    id: string;
+    slug: string;
+    name: string;
+    description: string;
+    website_url: string;
+    status: string;
+    project_count: number;
+    user_count: number;
+    created_at: string;
+    updated_at: string;
+  }>(`/admin/ecosystems/${id}`, {
+    requiresAuth: true,
+    method: 'PUT',
+    body: JSON.stringify(data),
   });
 
 // Leaderboard

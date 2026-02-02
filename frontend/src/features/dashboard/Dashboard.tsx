@@ -178,12 +178,11 @@ export function Dashboard() {
     const params = new URLSearchParams(window.location.search);
     params.set("tab", currentPage);
     if (selectedProjectId) params.set("project", selectedProjectId);
+    else if (params.get("project")) { /* keep from URL until deep-link effect sets state */ }
     else params.delete("project");
-    if (selectedIssue?.issueId && selectedIssue?.projectId) {
-      params.set("issue", selectedIssue.issueId);
-    } else {
-      params.delete("issue");
-    }
+    if (selectedIssue?.issueId && selectedIssue?.projectId) params.set("issue", selectedIssue.issueId);
+    else if (params.get("issue")) { /* keep from URL until deep-link effect sets state */ }
+    else params.delete("issue");
     const newUrl = `${window.location.pathname}?${params.toString()}`;
     window.history.replaceState({}, "", newUrl);
 

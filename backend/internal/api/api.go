@@ -204,11 +204,13 @@ func New(cfg config.Config, deps Deps) *fiber.App {
 
 	projects := handlers.NewProjectsHandler(cfg, deps.DB)
 	app.Post("/projects", auth.RequireAuth(cfg.JWTSecret), projects.Create())
-	// IMPORTANT: /projects/mine must come BEFORE /projects/:id to avoid route conflict
+	// IMPORTANT: /projects/mine and /projects/pending-setup must come BEFORE /projects/:id to avoid route conflict
 	app.Get("/projects/mine", auth.RequireAuth(cfg.JWTSecret), projects.Mine())
+	app.Get("/projects/pending-setup", auth.RequireAuth(cfg.JWTSecret), projects.PendingSetup())
 
 	// These routes with :id must come AFTER specific routes like /projects/mine
 	app.Get("/projects/:id", projectsPublic.Get())
+	app.Put("/projects/:id/metadata", auth.RequireAuth(cfg.JWTSecret), projects.UpdateMetadata())
 	app.Get("/projects/:id/issues/public", projectsPublic.IssuesPublic())
 	app.Get("/projects/:id/prs/public", projectsPublic.PRsPublic())
 	app.Post("/projects/:id/verify", auth.RequireAuth(cfg.JWTSecret), projects.Verify())

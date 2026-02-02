@@ -6,8 +6,9 @@ import { DashboardTab } from '../components/dashboard/DashboardTab';
 import { IssuesTab } from '../components/issues/IssuesTab';
 import { PullRequestsTab } from '../components/pull-requests/PullRequestsTab';
 import { TabType } from '../types';
-import { getMyProjects } from '../../../shared/api/client';
+import { getMyProjects, getPendingSetupProjects, type PendingSetupProject } from '../../../shared/api/client';
 import { InstallGitHubAppModal } from '../components/InstallGitHubAppModal';
+import { NewProjectSetupModal } from '../components/NewProjectSetupModal';
 
 interface MaintainersPageProps {
   onNavigate: (page: string) => void;
@@ -46,6 +47,7 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
   const [failedAvatars, setFailedAvatars] = useState<Set<string>>(new Set());
   const [targetIssueId, setTargetIssueId] = useState<string | undefined>(undefined);
   const [targetProjectId, setTargetProjectId] = useState<string | undefined>(undefined);
+  const [pendingSetupProjects, setPendingSetupProjects] = useState<PendingSetupProject[]>([]);
 
   useEffect(() => {
   if (projects && projects.length > 0) {
@@ -65,19 +67,31 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
 
   const tabs: TabType[] = ['Dashboard', 'Issues', 'Pull Requests'];
 
+  // Fetch pending setup projects (for New Project Setup modal after GitHub App install)
+  const loadPendingSetup = async () => {
+    try {
+      const pending = await getPendingSetupProjects();
+      setPendingSetupProjects(Array.isArray(pending) ? pending : []);
+    } catch {
+      setPendingSetupProjects([]);
+    }
+  };
+
   // Fetch projects from API
   useEffect(() => {
     loadProjects();
+    loadPendingSetup();
 
     // Check if we're returning from GitHub App installation
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('github_app_installed') === 'true') {
-      // Refresh projects after a short delay to allow backend to sync
-      setTimeout(() => {
+      // Refresh projects and pending setup after a delay to allow backend sync
+      const t = setTimeout(() => {
         loadProjects();
-      }, 3000); // Increased delay to allow backend sync to complete
-      // Clean up URL
+        loadPendingSetup();
+      }, 2500);
       window.history.replaceState({}, '', window.location.pathname);
+      return () => clearTimeout(t);
     }
   }, []);
 
@@ -187,6 +201,22 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
     setTargetIssueId(issueId);
     setTargetProjectId(projectId);
     setActiveTab('Issues');
+  };
+
+  const currentPendingProject = pendingSetupProjects[0] ?? null;
+  const isNewProjectSetupOpen = currentPendingProject !== null;
+
+  const handleNewProjectSetupSuccess = () => {
+    loadProjects();
+    setPendingSetupProjects((prev) => prev.slice(1));
+  };
+
+  const handleNewProjectSetupSkip = () => {
+    setPendingSetupProjects((prev) => prev.slice(1));
+  };
+
+  const handleNewProjectSetupClose = () => {
+    setPendingSetupProjects((prev) => prev.slice(1));
   };
 
   return (
@@ -431,6 +461,15 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onSuccess={refreshAll}
+      />
+
+      {/* New Project Setup Modal (after GitHub App install) */}
+      <NewProjectSetupModal
+        isOpen={isNewProjectSetupOpen}
+        project={currentPendingProject}
+        onClose={handleNewProjectSetupClose}
+        onSuccess={handleNewProjectSetupSuccess}
+        onSkip={handleNewProjectSetupSkip}
       />
     </div>
   );

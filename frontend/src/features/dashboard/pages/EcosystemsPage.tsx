@@ -296,7 +296,7 @@ export function EcosystemsPage({ onEcosystemClick }: EcosystemsPageProps) {
           >
             {/* Header with Icon */}
             <div className="flex items-start justify-between mb-4 md:mb-5">
-              <div className={`w-12 h-12 md:w-14 md:h-14 rounded-[12px] md:rounded-[14px] bg-gradient-to-br ${ecosystem.color} flex items-center justify-center shadow-lg border border-white/20 overflow-hidden`}>
+              <div className={`w-12 h-12 md:w-14 md:h-14 rounded-[12px] md:rounded-[14px] flex items-center justify-center shadow-lg border border-white/20 overflow-hidden ${ecosystem.logo_url ? 'bg-white' : `bg-gradient-to-br ${ecosystem.color}`}`}>
                 {ecosystem.logo_url ? (
                   <img
                     src={ecosystem.logo_url}

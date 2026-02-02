@@ -743,6 +743,38 @@ export const createProject = (data: {
     body: JSON.stringify(data),
   });
 
+export type PendingSetupProject = {
+  id: string;
+  github_full_name: string;
+  description: string | null;
+  ecosystem_id: string;
+  ecosystem_name: string;
+  language: string | null;
+  tags: string[];
+  category: string | null;
+};
+
+export const getPendingSetupProjects = () =>
+  apiRequest<PendingSetupProject[]>("/projects/pending-setup", {
+    requiresAuth: true,
+  });
+
+export const updateProjectMetadata = (
+  projectId: string,
+  data: {
+    description?: string;
+    ecosystem_name?: string;
+    language?: string;
+    tags?: string[];
+    category?: string;
+  },
+) =>
+  apiRequest<{ ok: boolean }>(`/projects/${projectId}/metadata`, {
+    requiresAuth: true,
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+
 export const verifyProject = (projectId: string) =>
   apiRequest<{
     id: string;

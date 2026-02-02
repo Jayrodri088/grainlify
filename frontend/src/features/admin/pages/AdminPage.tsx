@@ -651,8 +651,20 @@ export function AdminPage() {
                       }`}
                   >
                     <div className="flex items-start justify-between mb-3">
-                      <div className={`w-12 h-12 rounded-[12px] ${bgColor} flex items-center justify-center text-white font-bold text-lg shadow-lg`}>
-                        {firstLetter}
+                      <div className={`w-12 h-12 rounded-[12px] flex items-center justify-center text-white font-bold text-lg shadow-lg overflow-hidden flex-shrink-0 relative ${ecosystem.logo_url ? 'bg-white' : bgColor}`}>
+                        <span className="absolute inset-0 flex items-center justify-center" aria-hidden>
+                          {firstLetter}
+                        </span>
+                        {ecosystem.logo_url ? (
+                          <img
+                            src={ecosystem.logo_url}
+                            alt={`${ecosystem.name} logo`}
+                            className="w-full h-full object-cover relative z-10"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-1">
                         <button

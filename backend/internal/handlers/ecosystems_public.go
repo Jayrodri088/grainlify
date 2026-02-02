@@ -58,23 +58,24 @@ WHERE e.id = $1 AND e.status = 'active'
 			_ = json.Unmarshal(technologiesJSON, &technologies)
 		}
 
+		// Count only verified projects (same as public projects list) so Overview matches Projects tab
 		var projectCount int64
 		var contributorsCount int64
 		var openIssuesCount int64
 		var openPRsCount int64
 		_ = h.db.Pool.QueryRow(c.Context(), `
 SELECT
-  (SELECT COUNT(*) FROM projects p WHERE p.ecosystem_id = $1 AND p.deleted_at IS NULL),
+  (SELECT COUNT(*) FROM projects p WHERE p.ecosystem_id = $1 AND p.deleted_at IS NULL AND p.status = 'verified' AND p.needs_metadata = false),
   COALESCE((
     SELECT COUNT(DISTINCT a.author_login)
     FROM (
-      SELECT author_login FROM github_issues WHERE project_id IN (SELECT id FROM projects WHERE ecosystem_id = $1) AND author_login IS NOT NULL AND author_login != ''
+      SELECT author_login FROM github_issues WHERE project_id IN (SELECT id FROM projects WHERE ecosystem_id = $1 AND deleted_at IS NULL AND status = 'verified' AND needs_metadata = false) AND author_login IS NOT NULL AND author_login != ''
       UNION
-      SELECT author_login FROM github_pull_requests WHERE project_id IN (SELECT id FROM projects WHERE ecosystem_id = $1) AND author_login IS NOT NULL AND author_login != ''
+      SELECT author_login FROM github_pull_requests WHERE project_id IN (SELECT id FROM projects WHERE ecosystem_id = $1 AND deleted_at IS NULL AND status = 'verified' AND needs_metadata = false) AND author_login IS NOT NULL AND author_login != ''
     ) a
   ), 0),
-  COALESCE((SELECT COUNT(*) FROM github_issues gi INNER JOIN projects p ON p.id = gi.project_id WHERE p.ecosystem_id = $1 AND p.deleted_at IS NULL AND gi.state = 'open'), 0),
-  COALESCE((SELECT COUNT(*) FROM github_pull_requests gpr INNER JOIN projects p ON p.id = gpr.project_id WHERE p.ecosystem_id = $1 AND p.deleted_at IS NULL AND gpr.state = 'open'), 0)
+  COALESCE((SELECT COUNT(*) FROM github_issues gi INNER JOIN projects p ON p.id = gi.project_id WHERE p.ecosystem_id = $1 AND p.deleted_at IS NULL AND p.status = 'verified' AND p.needs_metadata = false AND gi.state = 'open'), 0),
+  COALESCE((SELECT COUNT(*) FROM github_pull_requests gpr INNER JOIN projects p ON p.id = gpr.project_id WHERE p.ecosystem_id = $1 AND p.deleted_at IS NULL AND p.status = 'verified' AND p.needs_metadata = false AND gpr.state = 'open'), 0)
 `, ecoID, ecoID, ecoID, ecoID).Scan(&projectCount, &contributorsCount, &openIssuesCount, &openPRsCount)
 
 		out := fiber.Map{

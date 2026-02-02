@@ -5,6 +5,7 @@ import { useAuth } from '../../../../shared/contexts/AuthContext';
 import { Issue } from '../../types';
 import { EmptyIssueState } from './EmptyIssueState';
 import { IssueCard } from '../../../../shared/components/ui/IssueCard';
+import { Modal, ModalFooter, ModalButton } from '../../../../shared/components/ui/Modal';
 import { applyToIssue, getProjectIssues } from '../../../../shared/api/client';
 import { formatDistanceToNow } from 'date-fns';
 import { IssueCardSkeleton } from '../../../../shared/components/IssueCardSkeleton';
@@ -76,6 +77,7 @@ export function IssuesTab({ onNavigate, selectedProjects, onRefresh, initialSele
   const [applicationDraft, setApplicationDraft] = useState('');
   const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
   const [applicationError, setApplicationError] = useState<string | null>(null);
+  const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [issues, setIssues] = useState<Array<IssueFromAPI & { projectName: string; projectId: string }>>([]);
   const [isLoadingIssues, setIsLoadingIssues] = useState(true);
   const filterBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -231,24 +233,30 @@ export function IssuesTab({ onNavigate, selectedProjects, onRefresh, initialSele
     return `https://github.com/${login}.png?size=${size}`;
   };
 
+  const GRAINLIFY_APP_PREFIX = '[grainlify application]';
+
+  const countApplicationComments = (comments: Array<{ body?: string | null }> | null | undefined): number => {
+    if (!Array.isArray(comments)) return 0;
+    return comments.filter((c) => (c?.body || '').toLowerCase().startsWith(GRAINLIFY_APP_PREFIX)).length;
+  };
+
   const getApplicationData = (issue: Issue | null, issueFromAPI: IssueFromAPI | null) => {
     if (!issue || !issueFromAPI) return null;
 
     // Get all comments from the API
     const comments = issueFromAPI.comments || [];
     const issueAuthor = issueFromAPI.author_login;
-    const appPrefix = '[grainlify application]';
 
     // Applications are explicit Grainlify application comments (so discussions can contain other chatter).
     const applications = comments
-      .filter(comment => (comment.body || '').toLowerCase().startsWith(appPrefix))
+      .filter(comment => (comment.body || '').toLowerCase().startsWith(GRAINLIFY_APP_PREFIX))
       .map((comment) => ({
         id: comment.id.toString(),
         author: {
           name: comment.user.login,
           avatar: getGitHubAvatar(comment.user.login, 48),
         },
-        message: (comment.body || '').replace(new RegExp(`^${appPrefix}\\s*`, 'i'), '').trim(),
+        message: (comment.body || '').replace(new RegExp(`^${GRAINLIFY_APP_PREFIX}\\s*`, 'i'), '').trim(),
         timeAgo: formatTimeAgo(comment.created_at),
         isAssigned: issue.applicationStatus === 'assigned',
         // These would need to come from user profile API in the future
@@ -265,7 +273,7 @@ export function IssuesTab({ onNavigate, selectedProjects, onRefresh, initialSele
       timeAgo: formatTimeAgo(comment.created_at),
       content: comment.body,
       isAuthor: comment.user.login === issueAuthor,
-      appliedForContribution: (comment.body || '').toLowerCase().startsWith(appPrefix),
+      appliedForContribution: (comment.body || '').toLowerCase().startsWith(GRAINLIFY_APP_PREFIX),
     }));
 
     return {
@@ -276,6 +284,74 @@ export function IssuesTab({ onNavigate, selectedProjects, onRefresh, initialSele
 
   const applicationData = getApplicationData(selectedIssue, selectedIssueFromAPI);
   const isDark = theme === 'dark';
+
+  const canApplyToSelectedIssue = selectedIssueFromAPI && (() => {
+    const isOpen = (selectedIssueFromAPI.state || '').toLowerCase() === 'open';
+    const assigneesCount = Array.isArray(selectedIssueFromAPI.assignees) ? selectedIssueFromAPI.assignees.length : 0;
+    const unassigned = assigneesCount === 0;
+    const notAuthor = !user?.github?.login || user.github.login.toLowerCase() !== (selectedIssueFromAPI.author_login || '').toLowerCase();
+    return isOpen && unassigned && notAuthor;
+  })();
+
+  const handleSubmitApplication = useCallback(async () => {
+    if (!selectedIssueFromAPI || !applicationDraft.trim()) return;
+    try {
+      setApplicationError(null);
+      setIsSubmittingApplication(true);
+      const res = await applyToIssue(
+        selectedIssueFromAPI.projectId,
+        selectedIssueFromAPI.number,
+        applicationDraft.trim()
+      );
+      const newComment = res.comment;
+      setSelectedIssueFromAPI((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          comments_count: (prev.comments_count || 0) + 1,
+          comments: [
+            ...(prev.comments || []),
+            {
+              id: newComment.id,
+              body: newComment.body,
+              user: { login: newComment.user.login },
+              created_at: newComment.created_at,
+              updated_at: newComment.updated_at,
+            } as CommentFromAPI,
+          ],
+        };
+      });
+      setIssues((prev) =>
+        prev.map((it) =>
+          it.github_issue_id === selectedIssueFromAPI.github_issue_id && it.projectId === selectedIssueFromAPI.projectId
+            ? {
+              ...it,
+              comments_count: (it.comments_count || 0) + 1,
+              comments: [
+                ...(it.comments || []),
+                {
+                  id: newComment.id,
+                  body: newComment.body,
+                  user: { login: newComment.user.login },
+                  created_at: newComment.created_at,
+                  updated_at: newComment.updated_at,
+                } as any,
+              ],
+            }
+            : it
+        )
+      );
+      setSelectedIssue((prev) =>
+        prev ? { ...prev, applicants: (prev.applicants || 0) + 1, comments: (prev.comments || 0) + 1 } : prev
+      );
+      setApplicationDraft('');
+      setApplyModalOpen(false);
+    } catch (e: any) {
+      setApplicationError(e?.message || 'Failed to submit application');
+    } finally {
+      setIsSubmittingApplication(false);
+    }
+  }, [selectedIssueFromAPI, applicationDraft]);
   const appliedFilterCount =
     selectedFilters.status.length +
     selectedFilters.applicants.length +
@@ -298,9 +374,9 @@ export function IssuesTab({ onNavigate, selectedProjects, onRefresh, initialSele
       const status = selectedFilters.status[0] || 'open';
       const matchesStatus = issue.state === status;
 
-      // Applicants filter
+      // Applicants filter (count only grainlify application comments)
       const applicants = selectedFilters.applicants[0]; // 'yes' | 'no' | undefined
-      const applicantCount = issue.comments_count || 0;
+      const applicantCount = countApplicationComments(issue.comments);
       const matchesApplicants = !applicants || (applicants === 'yes' ? applicantCount > 0 : applicantCount === 0);
 
       // Assignee filter (based on assignees array)
@@ -387,7 +463,7 @@ export function IssuesTab({ onNavigate, selectedProjects, onRefresh, initialSele
       user: match.author_login,
       timeAgo: timeAgoFormatted,
       tags: match.labels?.map((l: any) => l.name || l) || [],
-      applicants: match.comments_count || 0,
+      applicants: countApplicationComments(match.comments),
       comments: match.comments_count || 0,
       applicant: undefined,
       applicationStatus: 'pending',
@@ -493,7 +569,7 @@ export function IssuesTab({ onNavigate, selectedProjects, onRefresh, initialSele
                   user: issue.author_login,
                   timeAgo: timeAgoFormatted,
                   tags: issue.labels?.map((l: any) => l.name || l) || [],
-                  applicants: issue.comments_count || 0,
+                  applicants: countApplicationComments(issue.comments),
                   comments: issue.comments_count || 0,
                   applicant: undefined,
                   applicationStatus: 'pending',
@@ -508,7 +584,7 @@ export function IssuesTab({ onNavigate, selectedProjects, onRefresh, initialSele
                     number={`#${issue.number}`}
                     title={issue.title}
                     repository={issue.projectName}
-                    applicants={issue.comments_count || 0}
+                    applicants={countApplicationComments(issue.comments)}
                     author={{
                       name: issue.author_login,
                       avatar: `https://github.com/${issue.author_login}.png?size=40`
@@ -624,7 +700,7 @@ export function IssuesTab({ onNavigate, selectedProjects, onRefresh, initialSele
                     : 'text-[#7a6b5a] hover:bg-white/[0.05]'
                   }`}
               >
-                Applications {selectedIssue.applicants > 0 && `(${selectedIssue.applicants})`}
+                Applications ({applicationData ? applicationData.applications.length : (selectedIssue?.applicants ?? 0)})
               </button>
               <button
                 onClick={() => setIssueDetailTab('discussions')}

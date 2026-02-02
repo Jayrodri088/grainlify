@@ -528,6 +528,7 @@ export function MaintainersPage({ onNavigate }: MaintainersPageProps) {
       {activeTab === 'Dashboard' && (
         <DashboardTab
           selectedProjects={selectedProjects}
+          isLoadingProjects={isLoading}
           onRefresh={refreshAll}
           onNavigateToIssue={handleNavigateToIssue}
         />

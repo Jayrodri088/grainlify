@@ -180,12 +180,27 @@ export function EcosystemDetailPage({ ecosystemId, ecosystemName, initialDescrip
             { label: 'Discord Community', url: 'discord.gg', icon: 'discord' },
             { label: 'Twitter', url: 'twitter.com', icon: 'twitter' },
           ].map(({ label, url }) => ({ label, url })),
-    stats: {
-      activeContributors: { value: detail?.contributors_count ?? ecosystemProjects.reduce((s, p) => s + (p.contributors || 0), 0), change: '' },
-      activeProjects: { value: detail?.project_count ?? ecosystemProjects.length, change: '' },
-      availableIssues: { value: detail?.open_issues_count ?? ecosystemProjects.reduce((s, p) => s + p.openIssues, 0), change: '' },
-      mergedPullRequests: { value: detail?.open_prs_count ?? 0, change: '' },
-    },
+    // Use detail API counts when available; when detail returns 0 but we have projects (from Projects tab), use aggregated counts so Overview matches what user sees
+    stats: (() => {
+      const fromDetail = hasDetail && detail != null;
+      const detailProjects = fromDetail ? Number(detail?.project_count) || 0 : 0;
+      const detailContributors = fromDetail ? Number(detail?.contributors_count) || 0 : 0;
+      const detailIssues = fromDetail ? Number(detail?.open_issues_count) || 0 : 0;
+      const detailPrs = fromDetail ? Number(detail?.open_prs_count) || 0 : 0;
+      const fromProjects = {
+        projects: ecosystemProjects.length,
+        contributors: ecosystemProjects.reduce((s, p) => s + (p.contributors || 0), 0),
+        issues: ecosystemProjects.reduce((s, p) => s + p.openIssues, 0),
+        prs: ecosystemProjects.reduce((s, p) => s + (p.prs || 0), 0),
+      };
+      const useProjectsFallback = fromProjects.projects > 0 && detailProjects === 0;
+      return {
+        activeContributors: { value: useProjectsFallback ? fromProjects.contributors : (fromDetail ? detailContributors : fromProjects.contributors), change: '' },
+        activeProjects: { value: useProjectsFallback ? fromProjects.projects : (fromDetail ? detailProjects : fromProjects.projects), change: '' },
+        availableIssues: { value: useProjectsFallback ? fromProjects.issues : (fromDetail ? detailIssues : fromProjects.issues), change: '' },
+        mergedPullRequests: { value: useProjectsFallback ? fromProjects.prs : (fromDetail ? detailPrs : fromProjects.prs), change: '' },
+      };
+    })(),
     about: hasDetail
       ? (detail?.about?.trim() || '')
       : `The ${ecosystemName} ecosystem represents a paradigm shift towards decentralized applications, protocols, and infrastructure.`,
@@ -266,13 +281,13 @@ export function EcosystemDetailPage({ ecosystemId, ecosystemName, initialDescrip
                   <div className="flex items-center gap-1.5 md:gap-2">
                     <Users className={`w-3 h-3 md:w-3.5 md:h-3.5 flex-shrink-0 ${isDark ? 'text-[#c9983a]' : 'text-[#8b6914]'}`} />
                     <span className={`text-[11px] md:text-[13px] font-bold ${isDark ? 'text-[#c9983a]' : 'text-[#8b6914]'}`}>
-                      {ecosystemData.stats.activeContributors.value}
+                      {isLoadingDetail ? '—' : ecosystemData.stats.activeContributors.value}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 md:gap-2">
                     <FolderGit2 className={`w-3 h-3 md:w-3.5 md:h-3.5 flex-shrink-0 ${isDark ? 'text-[#c9983a]' : 'text-[#8b6914]'}`} />
                     <span className={`text-[11px] md:text-[13px] font-bold ${isDark ? 'text-[#c9983a]' : 'text-[#8b6914]'}`}>
-                      {ecosystemData.stats.activeProjects.value}
+                      {isLoadingDetail ? '—' : ecosystemData.stats.activeProjects.value}
                     </span>
                   </div>
                 </div>
@@ -410,7 +425,7 @@ export function EcosystemDetailPage({ ecosystemId, ecosystemName, initialDescrip
                   </div>
                   <div className="flex items-end gap-2">
                     <span className={`text-[20px] md:text-[28px] font-bold ${isDark ? 'text-[#c9983a]' : 'text-[#a67c2a]'}`}>
-                      {ecosystemData.stats.activeContributors.value}
+                      {isLoadingDetail ? '—' : ecosystemData.stats.activeContributors.value}
                     </span>
                   </div>
                 </div>
@@ -426,7 +441,7 @@ export function EcosystemDetailPage({ ecosystemId, ecosystemName, initialDescrip
                   </div>
                   <div className="flex items-end gap-2">
                     <span className={`text-[20px] md:text-[28px] font-bold ${isDark ? 'text-[#c9983a]' : 'text-[#a67c2a]'}`}>
-                      {ecosystemData.stats.activeProjects.value}
+                      {isLoadingDetail ? '—' : ecosystemData.stats.activeProjects.value}
                     </span>
                   </div>
                 </div>
@@ -442,7 +457,7 @@ export function EcosystemDetailPage({ ecosystemId, ecosystemName, initialDescrip
                   </div>
                   <div className="flex items-end gap-2">
                     <span className={`text-[20px] md:text-[28px] font-bold ${isDark ? 'text-[#c9983a]' : 'text-[#a67c2a]'}`}>
-                      {ecosystemData.stats.availableIssues.value}
+                      {isLoadingDetail ? '—' : ecosystemData.stats.availableIssues.value}
                     </span>
                   </div>
                 </div>
@@ -453,12 +468,12 @@ export function EcosystemDetailPage({ ecosystemId, ecosystemName, initialDescrip
                     <span className={`text-[9px] md:text-[11px] font-bold uppercase tracking-wide leading-tight ${
                       isDark ? 'text-[#d4d4d4]' : 'text-[#7a6b5a]'
                     }`}>
-                      Merged PRs
+                      Open PRs
                     </span>
                   </div>
                   <div className="flex items-end gap-2">
                     <span className={`text-[20px] md:text-[28px] font-bold ${isDark ? 'text-[#c9983a]' : 'text-[#a67c2a]'}`}>
-                      {ecosystemData.stats.mergedPullRequests.value}
+                      {isLoadingDetail ? '—' : ecosystemData.stats.mergedPullRequests.value}
                     </span>
                   </div>
                 </div>

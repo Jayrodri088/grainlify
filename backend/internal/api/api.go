@@ -155,6 +155,7 @@ func New(cfg config.Config, deps Deps) *fiber.App {
 	app.Get("/profile/calendar", auth.RequireAuth(cfg.JWTSecret), userProfile.ContributionCalendar())
 	app.Get("/profile/activity", auth.RequireAuth(cfg.JWTSecret), userProfile.ContributionActivity())
 	app.Get("/profile/projects", auth.RequireAuth(cfg.JWTSecret), userProfile.ProjectsContributed())
+	app.Get("/profile/projects-led", auth.RequireAuth(cfg.JWTSecret), userProfile.ProjectsLed())
 	app.Put("/profile/update", auth.RequireAuth(cfg.JWTSecret), userProfile.UpdateProfile())
 	app.Put("/profile/avatar", auth.RequireAuth(cfg.JWTSecret), userProfile.UpdateAvatar())
 

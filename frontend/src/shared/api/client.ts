@@ -297,6 +297,23 @@ export const getProjectsContributed = (userId?: string, login?: string) => {
   >(`/profile/projects${query}`, { requiresAuth: true });
 };
 
+export const getProjectsLed = (userId?: string, login?: string) => {
+  const params = new URLSearchParams();
+  if (userId) params.append("user_id", userId);
+  if (login) params.append("login", login);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiRequest<
+    Array<{
+      id: string;
+      github_full_name: string;
+      status: string;
+      ecosystem_name?: string;
+      language?: string;
+      owner_avatar_url?: string;
+    }>
+  >(`/profile/projects-led${query}`, { requiresAuth: true });
+};
+
 export const getPublicProfile = (userId?: string, login?: string) => {
   const params = new URLSearchParams();
   if (userId) params.append("user_id", userId);

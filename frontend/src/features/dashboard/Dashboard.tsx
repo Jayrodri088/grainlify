@@ -803,6 +803,10 @@ export function Dashboard() {
                         "/dashboard?page=leaderboard",
                       );
                     }}
+                    onProjectClick={(id) => {
+                      setSelectedProjectId(id);
+                      setCurrentPage("discover");
+                    }}
                     onIssueClick={(issueId, projectId) => {
                       setSelectedProjectId(projectId);
                       setSelectedIssue({ issueId, projectId });

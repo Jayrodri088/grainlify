@@ -10,7 +10,8 @@ fn create_token_contract<'a>(
     e: &Env,
     admin: &Address,
 ) -> (token::Client<'a>, token::StellarAssetClient<'a>) {
-    let contract_address = e.register_stellar_asset_contract(admin.clone());
+    let contract = e.register_stellar_asset_contract_v2(admin.clone());
+    let contract_address = contract.address();
     (
         token::Client::new(e, &contract_address),
         token::StellarAssetClient::new(e, &contract_address),
@@ -296,7 +297,7 @@ fn test_claim_window_zero_prevents_all_claims() {
 
     setup.escrow.authorize_claim(&bounty_id, &setup.contributor);
 
-    let claim = setup.escrow.get_pending_claim(&bounty_id);
+    let _claim = setup.escrow.get_pending_claim(&bounty_id);
 
     // Advance well past the deadline
     setup.env.ledger().set_timestamp(deadline + 1);

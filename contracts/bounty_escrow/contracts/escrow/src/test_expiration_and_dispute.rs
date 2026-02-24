@@ -25,11 +25,11 @@ fn create_escrow_contract<'a>(e: &Env) -> BountyEscrowContractClient<'a> {
 
 struct TestSetup<'a> {
     env: Env,
-    admin: Address,
+    _admin: Address, // Added underscore
     depositor: Address,
     contributor: Address,
     token: token::Client<'a>,
-    token_admin: token::StellarAssetClient<'a>,
+    _token_admin: token::StellarAssetClient<'a>, // Added underscore
     escrow: BountyEscrowContractClient<'a>,
 }
 
@@ -52,16 +52,15 @@ impl<'a> TestSetup<'a> {
 
         Self {
             env,
-            admin,
+            _admin: admin,
             depositor,
             contributor,
             token,
-            token_admin,
+            _token_admin: token_admin,
             escrow,
         }
     }
 }
-
 // Vulnerability: pending claims don't block refunds
 #[test]
 fn test_pending_claim_does_not_block_refund_vulnerability() {
@@ -84,7 +83,7 @@ fn test_pending_claim_does_not_block_refund_vulnerability() {
 
     // Verify claim is pending
     let claim = setup.escrow.get_pending_claim(&bounty_id);
-    assert_eq!(claim.claimed, false);
+    assert!(!claim.claimed);
     assert_eq!(claim.recipient, setup.contributor);
 
     // Advance time PAST deadline
@@ -353,7 +352,7 @@ fn test_multiple_bounties_independent_resolution() {
     );
 
     let claim_3 = setup.escrow.get_pending_claim(&3);
-    assert_eq!(claim_3.claimed, false);
+    assert!(!claim_3.claimed);
 
     let claim_3_expires = claim_3.expires_at;
     setup.env.ledger().set_timestamp(claim_3_expires - 100);

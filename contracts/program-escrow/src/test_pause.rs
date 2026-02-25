@@ -231,12 +231,13 @@ fn test_set_paused_emits_events() {
     let topic_0: Symbol = topics.get(0).unwrap().into_val(&env);
     assert_eq!(topic_0, Symbol::new(&env, "PauseSt"));
     
-    let data: (Symbol, bool, Address, Option<String>, u64) = emitted.2.try_into_val(&env).unwrap();
-    assert_eq!(data.0, Symbol::new(&env, "lock"));
-    assert_eq!(data.1, true);
-    assert_eq!(data.2, admin);
-    assert_eq!(data.3, None);
-    assert!(data.4 > 0);
+    let data: PauseStateChanged = emitted.2.try_into_val(&env).unwrap();
+    assert_eq!(data.operation, symbol_short!("lock"));
+    assert_eq!(data.paused, true);
+    assert_eq!(data.admin, admin);
+    assert_eq!(data.reason, None);
+    assert!(data.timestamp > 0);
+    assert!(data.receipt_id > 0);
 }
 
 #[test]
@@ -454,11 +455,12 @@ fn test_rbac_emergency_withdraw_emits_event() {
     assert_eq!(topic_0, Symbol::new(&env, "em_wtd"));
     
     // Verify event data: (admin, target, balance, timestamp)
-    let data: (Address, Address, i128, u64) = last_event.2.try_into_val(&env).unwrap();
-    assert_eq!(data.0, admin);
-    assert_eq!(data.1, target);
-    assert_eq!(data.2, 500i128);
-    assert_eq!(data.3, 54321u64);
+    let data: EmergencyWithdrawEvent = last_event.2.try_into_val(&env).unwrap();
+    assert_eq!(data.admin, admin);
+    assert_eq!(data.target, target);
+    assert_eq!(data.amount, 500i128);
+    assert_eq!(data.timestamp, 54321u64);
+    assert!(data.receipt_id > 0);
 }
 
 /// Idempotent: second emergency_withdraw on empty contract does nothing (no panic)

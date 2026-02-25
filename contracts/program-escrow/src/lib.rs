@@ -288,6 +288,7 @@ const PROGRAM_DATA: Symbol = symbol_short!("ProgData");
 const SCHEDULES: Symbol = symbol_short!("Scheds");
 const RELEASE_HISTORY: Symbol = symbol_short!("RelHist");
 const NEXT_SCHEDULE_ID: Symbol = symbol_short!("NxtSched");
+const RECEIPT_COUNTER: Symbol = symbol_short!("RcpCntr");
 const PROGRAM_INDEX: Symbol = symbol_short!("ProgIdx");
 const AUTH_KEY_INDEX: Symbol = symbol_short!("AuthIdx");
 
@@ -317,6 +318,7 @@ pub struct ProgramInitializedEvent {
     pub token_address: Address,
     pub total_funds: i128,
     pub reference_hash: Option<soroban_sdk::Bytes>,
+    pub receipt_id: u64,
 }
 
 #[contracttype]
@@ -326,6 +328,7 @@ pub struct FundsLockedEvent {
     pub program_id: String,
     pub amount: i128,
     pub remaining_balance: i128,
+    pub receipt_id: u64,
 }
 
 #[contracttype]
@@ -336,6 +339,7 @@ pub struct BatchPayoutEvent {
     pub recipient_count: u32,
     pub total_amount: i128,
     pub remaining_balance: i128,
+    pub receipt_id: u64,
 }
 
 #[contracttype]
@@ -346,6 +350,18 @@ pub struct PayoutEvent {
     pub recipient: Address,
     pub amount: i128,
     pub remaining_balance: i128,
+    pub receipt_id: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleCreatedEvent {
+    pub program_id: String,
+    pub schedule_id: u64,
+    pub recipient: Address,
+    pub amount: i128,
+    pub release_timestamp: u64,
+    pub receipt_id: u64,
 }
 
 #[contracttype]
@@ -376,6 +392,7 @@ pub enum DataKey {
     ClaimWindow,                     // u64 seconds (global config)
     PauseFlags,                      // PauseFlags struct
     RateLimitConfig,                 // RateLimitConfig struct
+    ReceiptCounter,                  // u64 Global Receipt Counter
 }
 
 #[contracttype]
@@ -394,6 +411,19 @@ pub struct PauseStateChanged {
     pub operation: Symbol,
     pub paused: bool,
     pub admin: Address,
+    pub reason: Option<String>,
+    pub timestamp: u64,
+    pub receipt_id: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmergencyWithdrawEvent {
+    pub admin: Address,
+    pub target: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+    pub receipt_id: u64,
 }
 
 #[contracttype]
@@ -504,6 +534,13 @@ pub struct ProgramEscrowContract;
 
 #[contractimpl]
 impl ProgramEscrowContract {
+    fn increment_receipt_id(env: &Env) -> u64 {
+        let mut count: u64 = env.storage().instance().get(&DataKey::ReceiptCounter).unwrap_or(0);
+        count += 1;
+        env.storage().instance().set(&DataKey::ReceiptCounter, &count);
+        count
+    }
+
     /// Initialize a new program escrow
     ///
     /// # Arguments
@@ -534,6 +571,8 @@ impl ProgramEscrowContract {
         initial_liquidity: Option<i128>,
         reference_hash: Option<soroban_sdk::Bytes>,
     ) -> ProgramData {
+        let receipt_id = Self::increment_receipt_id(&env);
+
         // Check if program already exists
         if env.storage().instance().has(&PROGRAM_DATA) {
             panic!("Program already initialized");
@@ -587,6 +626,7 @@ impl ProgramEscrowContract {
                 token_address,
                 total_funds,
                 reference_hash,
+                receipt_id,
             },
         );
 
@@ -671,9 +711,18 @@ impl ProgramEscrowContract {
             );
 
             registry.push_back(program_id.clone());
+            let receipt_id = Self::increment_receipt_id(&env);
             env.events().publish(
-                (PROGRAM_REGISTERED,),
-                (program_id, authorized_payout_key, token_address, 0i128),
+                (PROGRAM_INITIALIZED,),
+                ProgramInitializedEvent {
+                    version: EVENT_VERSION_V2,
+                    program_id,
+                    authorized_payout_key,
+                    token_address,
+                    total_funds: 0,
+                    reference_hash: item.reference_hash,
+                    receipt_id,
+                },
             );
         }
         env.storage().instance().set(&PROGRAM_REGISTRY, &registry);
@@ -752,6 +801,8 @@ impl ProgramEscrowContract {
         // Store updated data
         env.storage().instance().set(&PROGRAM_DATA, &program_data);
 
+        let receipt_id = Self::increment_receipt_id(&env);
+
         // Emit FundsLocked event
         env.events().publish(
             (FUNDS_LOCKED,),
@@ -760,6 +811,7 @@ impl ProgramEscrowContract {
                 program_id: program_data.program_id.clone(),
                 amount,
                 remaining_balance: program_data.remaining_balance,
+                receipt_id,
             },
         );
 
@@ -818,25 +870,49 @@ impl ProgramEscrowContract {
 
         if let Some(paused) = lock {
             flags.lock_paused = paused;
+            let receipt_id = Self::increment_receipt_id(&env);
             env.events().publish(
                 (PAUSE_STATE_CHANGED,),
-                (symbol_short!("lock"), paused, admin.clone(), reason.clone(), timestamp),
+                PauseStateChanged {
+                    operation: symbol_short!("lock"),
+                    paused,
+                    admin: admin.clone(),
+                    reason: reason.clone(),
+                    timestamp,
+                    receipt_id,
+                },
             );
         }
 
         if let Some(paused) = release {
             flags.release_paused = paused;
+            let receipt_id = Self::increment_receipt_id(&env);
             env.events().publish(
                 (PAUSE_STATE_CHANGED,),
-                (symbol_short!("release"), paused, admin.clone(), reason.clone(), timestamp),
+                PauseStateChanged {
+                    operation: symbol_short!("release"),
+                    paused,
+                    admin: admin.clone(),
+                    reason: reason.clone(),
+                    timestamp,
+                    receipt_id,
+                },
             );
         }
 
         if let Some(paused) = refund {
             flags.refund_paused = paused;
+            let receipt_id = Self::increment_receipt_id(&env);
             env.events().publish(
                 (PAUSE_STATE_CHANGED,),
-                (symbol_short!("refund"), paused, admin.clone(), reason.clone(), timestamp),
+                PauseStateChanged {
+                    operation: symbol_short!("refund"),
+                    paused,
+                    admin: admin.clone(),
+                    reason: reason.clone(),
+                    timestamp,
+                    receipt_id,
+                },
             );
         }
 
@@ -875,9 +951,16 @@ impl ProgramEscrowContract {
         
         if balance > 0 {
             token_client.transfer(&contract_address, &target, &balance);
+            let receipt_id = Self::increment_receipt_id(&env);
             env.events().publish(
                 (symbol_short!("em_wtd"),),
-                (admin, target.clone(), balance, env.ledger().timestamp()),
+                EmergencyWithdrawEvent {
+                    admin,
+                    target: target.clone(),
+                    amount: balance,
+                    timestamp: env.ledger().timestamp(),
+                    receipt_id,
+                },
             );
         }
     }
@@ -1081,6 +1164,8 @@ impl ProgramEscrowContract {
         // Store updated data
         env.storage().instance().set(&PROGRAM_DATA, &updated_data);
 
+        let receipt_id = Self::increment_receipt_id(&env);
+
         // Emit BatchPayout event
         env.events().publish(
             (BATCH_PAYOUT,),
@@ -1090,6 +1175,7 @@ impl ProgramEscrowContract {
                 recipient_count: recipients.len() as u32,
                 total_amount: total_payout,
                 remaining_balance: updated_data.remaining_balance,
+                receipt_id,
             },
         );
 
@@ -1165,6 +1251,8 @@ impl ProgramEscrowContract {
         // Store updated data
         env.storage().instance().set(&PROGRAM_DATA, &updated_data);
 
+        let receipt_id = Self::increment_receipt_id(&env);
+
         // Emit Payout event
         env.events().publish(
             (PAYOUT,),
@@ -1174,6 +1262,7 @@ impl ProgramEscrowContract {
                 recipient,
                 amount,
                 remaining_balance: updated_data.remaining_balance,
+                receipt_id,
             },
         );
 
@@ -1254,6 +1343,19 @@ impl ProgramEscrowContract {
         .instance()
         .set(&NEXT_SCHEDULE_ID, &(schedule_id + 1));
 
+    let receipt_id = Self::increment_receipt_id(&env);
+    env.events().publish(
+        (symbol_short!("sch_cred"),),
+        ScheduleCreatedEvent {
+            program_id: program_data.program_id.clone(),
+            schedule_id,
+            recipient: schedule.recipient.clone(),
+            amount,
+            release_timestamp,
+            receipt_id,
+        },
+    );
+
     schedule
 }
 
@@ -1312,6 +1414,20 @@ impl ProgramEscrowContract {
                 amount: schedule.amount,
                 timestamp: now,
             });
+
+            let receipt_id = Self::increment_receipt_id(&env);
+            env.events().publish(
+                (PAYOUT,),
+                PayoutEvent {
+                    version: EVENT_VERSION_V2,
+                    program_id: program_data.program_id.clone(),
+                    recipient: schedule.recipient.clone(),
+                    amount: schedule.amount,
+                    remaining_balance: program_data.remaining_balance,
+                    receipt_id,
+                },
+            );
+
             release_history.push_back(ProgramReleaseHistory {
                 schedule_id: schedule.schedule_id,
                 recipient: schedule.recipient,
@@ -1791,12 +1907,25 @@ impl ProgramEscrowContract {
                 .unwrap_or_else(|| Vec::new(&env));
             history.push_back(ProgramReleaseHistory {
                 schedule_id: s.schedule_id,
-                recipient: s.recipient,
+                recipient: s.recipient.clone(),
                 amount: s.amount,
                 released_at: now,
                 release_type: ReleaseType::Manual,
             });
             env.storage().instance().set(&RELEASE_HISTORY, &history);
+
+            let receipt_id = Self::increment_receipt_id(&env);
+            env.events().publish(
+                (PAYOUT,),
+                PayoutEvent {
+                    version: EVENT_VERSION_V2,
+                    program_id: updated_program_data.program_id.clone(),
+                    recipient: s.recipient,
+                    amount: s.amount,
+                    remaining_balance: updated_program_data.remaining_balance,
+                    receipt_id,
+                },
+            );
         }
     }
 
@@ -1851,12 +1980,25 @@ impl ProgramEscrowContract {
                 .unwrap_or_else(|| Vec::new(&env));
             history.push_back(ProgramReleaseHistory {
                 schedule_id: s.schedule_id,
-                recipient: s.recipient,
+                recipient: s.recipient.clone(),
                 amount: s.amount,
                 released_at: now,
                 release_type: ReleaseType::Automatic,
             });
             env.storage().instance().set(&RELEASE_HISTORY, &history);
+
+            let receipt_id = Self::increment_receipt_id(&env);
+            env.events().publish(
+                (PAYOUT,),
+                PayoutEvent {
+                    version: EVENT_VERSION_V2,
+                    program_id: updated_program_data.program_id.clone(),
+                    recipient: s.recipient,
+                    amount: s.amount,
+                    remaining_balance: updated_program_data.remaining_balance,
+                    receipt_id,
+                },
+            );
         }
     }
 

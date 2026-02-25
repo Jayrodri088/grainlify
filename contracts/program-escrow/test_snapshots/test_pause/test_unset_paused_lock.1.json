@@ -146,6 +146,18 @@
                             }
                           ]
                         }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "ReceiptCounter"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": 2
+                        }
                       }
                     ]
                   }
@@ -340,19 +352,52 @@
               }
             ],
             "data": {
-              "vec": [
+              "map": [
                 {
-                  "symbol": "lock"
+                  "key": {
+                    "symbol": "admin"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  }
                 },
                 {
-                  "bool": true
+                  "key": {
+                    "symbol": "operation"
+                  },
+                  "val": {
+                    "symbol": "lock"
+                  }
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  "key": {
+                    "symbol": "paused"
+                  },
+                  "val": {
+                    "bool": true
+                  }
                 },
-                "void",
                 {
-                  "u64": 0
+                  "key": {
+                    "symbol": "reason"
+                  },
+                  "val": "void"
+                },
+                {
+                  "key": {
+                    "symbol": "receipt_id"
+                  },
+                  "val": {
+                    "u64": 1
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "timestamp"
+                  },
+                  "val": {
+                    "u64": 0
+                  }
                 }
               ]
             }
@@ -428,19 +473,52 @@
               }
             ],
             "data": {
-              "vec": [
+              "map": [
                 {
-                  "symbol": "lock"
+                  "key": {
+                    "symbol": "admin"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  }
                 },
                 {
-                  "bool": false
+                  "key": {
+                    "symbol": "operation"
+                  },
+                  "val": {
+                    "symbol": "lock"
+                  }
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  "key": {
+                    "symbol": "paused"
+                  },
+                  "val": {
+                    "bool": false
+                  }
                 },
-                "void",
                 {
-                  "u64": 0
+                  "key": {
+                    "symbol": "reason"
+                  },
+                  "val": "void"
+                },
+                {
+                  "key": {
+                    "symbol": "receipt_id"
+                  },
+                  "val": {
+                    "u64": 2
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "timestamp"
+                  },
+                  "val": {
+                    "u64": 0
+                  }
                 }
               ]
             }

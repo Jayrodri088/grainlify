@@ -94,12 +94,10 @@ pub enum Error {
     ProposalExpired = 14,
 }
 
-// --- CLAVE: Añadir macro #[contract] ---
-// Note: Commented out to avoid symbol conflicts when used as a module
-// #[contract]
+#[contract]
 pub struct GovernanceContract;
 
-// #[contractimpl]
+#[contractimpl]
 impl GovernanceContract {
     pub fn init_governance(
         env: Env,
@@ -493,5 +491,4 @@ mod test {
         let status = client.finalize_proposal(&proposal_id);
         assert_eq!(status, ProposalStatus::Approved);
     }
-    */
 }

@@ -2869,7 +2869,7 @@ impl BountyEscrowContract {
         env.storage()
             .persistent()
             .set(&DataKey::Metadata(bounty_id), &metadata);
-            
+
         // Emit update event
         events::emit_metadata_updated(&env, bounty_id, metadata.clone());
         Ok(())

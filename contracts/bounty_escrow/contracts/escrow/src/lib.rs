@@ -4432,3 +4432,6 @@ mod test_deadline_variants;
 mod test_query_filters;
 #[cfg(test)]
 mod test_status_transitions;
+#[cfg(test)]
+mod test_e2e_upgrade_with_pause;
+

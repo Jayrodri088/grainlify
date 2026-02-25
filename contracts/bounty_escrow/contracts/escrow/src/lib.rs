@@ -109,12 +109,16 @@ pub(crate) mod monitoring {
     pub fn track_operation(env: &Env, operation: Symbol, caller: Address, success: bool) {
         let key = Symbol::new(env, OPERATION_COUNT);
         let count: u64 = env.storage().persistent().get(&key).unwrap_or(0);
-        env.storage().persistent().set(&key, &(count + 1));
+        env.storage()
+            .persistent()
+            .set(&key, &count.checked_add(1).unwrap());
 
         if !success {
             let err_key = Symbol::new(env, ERROR_COUNT);
             let err_count: u64 = env.storage().persistent().get(&err_key).unwrap_or(0);
-            env.storage().persistent().set(&err_key, &(err_count + 1));
+            env.storage()
+                .persistent()
+                .set(&err_key, &err_count.checked_add(1).unwrap());
         }
 
         env.events().publish(
@@ -138,10 +142,12 @@ pub(crate) mod monitoring {
         let count: u64 = env.storage().persistent().get(&count_key).unwrap_or(0);
         let total: u64 = env.storage().persistent().get(&time_key).unwrap_or(0);
 
-        env.storage().persistent().set(&count_key, &(count + 1));
         env.storage()
             .persistent()
-            .set(&time_key, &(total + duration));
+            .set(&count_key, &count.checked_add(1).unwrap());
+        env.storage()
+            .persistent()
+            .set(&time_key, &total.checked_add(duration).unwrap());
 
         env.events().publish(
             (symbol_short!("metric"), symbol_short!("perf")),
@@ -340,9 +346,9 @@ mod anti_abuse {
                 .window_start_timestamp
                 .saturating_add(config.window_size)
         {
-            // New window
+            // New window: start at 1 (safe)
             state.window_start_timestamp = now;
-            state.operation_count = 1;
+            state.operation_count = 0.checked_add(1).unwrap();
         } else {
             // Same window
             if state.operation_count >= config.max_operations {
@@ -352,7 +358,7 @@ mod anti_abuse {
                 );
                 panic!("Rate limit exceeded");
             }
-            state.operation_count += 1;
+            state.operation_count = state.operation_count.checked_add(1).unwrap();
         }
 
         state.last_operation_timestamp = now;
@@ -1758,7 +1764,7 @@ impl BountyEscrowContract {
             &payout_amount,
         );
 
-        escrow.remaining_amount -= payout_amount;
+        escrow.remaining_amount = escrow.remaining_amount.checked_sub(payout_amount).unwrap();
         if escrow.remaining_amount == 0 {
             escrow.status = EscrowStatus::Released;
         }
@@ -2175,7 +2181,7 @@ impl BountyEscrowContract {
         }
 
         // EFFECTS: update escrow state before external call (CEI)
-        escrow.remaining_amount -= payout_amount;
+        escrow.remaining_amount = escrow.remaining_amount.checked_sub(payout_amount).unwrap();
         if escrow.remaining_amount == 0 {
             escrow.status = EscrowStatus::Released;
         }
@@ -2290,7 +2296,7 @@ impl BountyEscrowContract {
 
         // EFFECTS: update state before external call (CEI)
         invariants::assert_escrow(&env, &escrow);
-        escrow.remaining_amount -= refund_amount;
+        escrow.remaining_amount = escrow.remaining_amount.checked_sub(refund_amount).unwrap();
         if is_full || escrow.remaining_amount == 0 {
             escrow.status = EscrowStatus::Refunded;
         } else {
@@ -2939,16 +2945,18 @@ impl BountyEscrowContract {
             {
                 match escrow.status {
                     EscrowStatus::Locked => {
-                        stats.total_locked += escrow.amount;
-                        stats.count_locked += 1;
+                        stats.total_locked = stats.total_locked.checked_add(escrow.amount).unwrap();
+                        stats.count_locked = stats.count_locked.checked_add(1).unwrap();
                     }
                     EscrowStatus::Released => {
-                        stats.total_released += escrow.amount;
-                        stats.count_released += 1;
+                        stats.total_released =
+                            stats.total_released.checked_add(escrow.amount).unwrap();
+                        stats.count_released = stats.count_released.checked_add(1).unwrap();
                     }
                     EscrowStatus::Refunded | EscrowStatus::PartiallyRefunded => {
-                        stats.total_refunded += escrow.amount;
-                        stats.count_refunded += 1;
+                        stats.total_refunded =
+                            stats.total_refunded.checked_add(escrow.amount).unwrap();
+                        stats.count_refunded = stats.count_refunded.checked_add(1).unwrap();
                     }
                 }
             }
@@ -3031,11 +3039,11 @@ impl BountyEscrowContract {
             {
                 if escrow.status == status {
                     if skipped < offset {
-                        skipped += 1;
+                        skipped = skipped.checked_add(1).unwrap();
                         continue;
                     }
                     results.push_back(bounty_id);
-                    count += 1;
+                    count = count.checked_add(1).unwrap();
                 }
             }
         }
@@ -3327,7 +3335,10 @@ impl BountyEscrowContract {
             &env,
             BatchFundsLocked {
                 count: locked_count,
-                total_amount: items.iter().map(|i| i.amount).sum(),
+                total_amount: items
+                    .iter()
+                    .try_fold(0i128, |acc, i| acc.checked_add(i.amount))
+                    .unwrap(),
                 timestamp,
             },
         );

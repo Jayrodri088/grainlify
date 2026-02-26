@@ -238,6 +238,96 @@ pub(crate) mod monitoring {
     }
 }
 
+#[cfg(test)]
+mod test_release_schedules {
+    use super::*;
+    use soroban_sdk::{testutils::{Address as _, Ledger}, token, Address, Env};
+
+    #[test]
+    fn test_single_escrow_release_schedule_automatic() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let depositor = Address::generate(&env);
+        let contributor = Address::generate(&env);
+
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = token_id.address();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token);
+        let contract_id = env.register_contract(None, BountyEscrowContract);
+        let client = BountyEscrowContractClient::new(&env, &contract_id);
+
+        // init
+        client.init(&admin, &token);
+
+        // lock funds: mint tokens for depositor first
+        let bounty_id = 1u64;
+        let amount: i128 = 1_000_0000;
+        let deadline = env.ledger().timestamp() + 1000;
+        token_admin_client.mint(&depositor, &amount);
+        client.lock_funds(&depositor, &bounty_id, &amount, &deadline);
+
+        // create schedule
+        let now = env.ledger().timestamp();
+        let release_ts = now + 10;
+        client.create_release_schedule(&bounty_id, &500_0000, &release_ts, &contributor.clone());
+
+        // try before timestamp -> error
+        env.ledger().set_timestamp(now + 5);
+        let res = client.try_release_schedule_automatic(&bounty_id, &1);
+        assert!(res.is_err());
+
+        // advance and release
+        env.ledger().set_timestamp(now + 11);
+        client.release_schedule_automatic(&bounty_id, &1);
+
+        // verify schedule released and history
+        let schedule = client.get_all_release_schedules(&bounty_id).get(0).unwrap();
+        assert!(schedule.released);
+        let history = client.get_release_history(&bounty_id);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.get(0).unwrap().amount, 500_0000);
+    }
+
+    #[test]
+    fn test_manual_release_before_after_timestamp() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let depositor = Address::generate(&env);
+        let contributor = Address::generate(&env);
+
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let token = token_id.address();
+        let token_admin_client = token::StellarAssetClient::new(&env, &token);
+        let contract_id = env.register_contract(None, BountyEscrowContract);
+        let client = BountyEscrowContractClient::new(&env, &contract_id);
+
+        // init and lock
+        client.init(&admin, &token);
+        let bounty_id = 2u64;
+        let amount: i128 = 2_000_0000;
+        let deadline = env.ledger().timestamp() + 1000;
+        token_admin_client.mint(&depositor, &amount);
+        client.lock_funds(&depositor, &bounty_id, &amount, &deadline);
+
+        // create schedule
+        let now = env.ledger().timestamp();
+        let release_ts = now + 100;
+        client.create_release_schedule(&bounty_id, &1_000_0000, &release_ts, &contributor.clone());
+
+        // manual release before timestamp by admin
+        env.ledger().set_timestamp(now + 10);
+        client.release_schedule_manual(&bounty_id, &1);
+
+        let schedule = client.get_all_release_schedules(&bounty_id).get(0).unwrap();
+        assert!(schedule.released);
+        let history = client.get_release_history(&bounty_id);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.get(0).unwrap().release_type, ReleaseType::Manual);
+    }
+}
+
 mod anti_abuse {
     use soroban_sdk::{contracttype, symbol_short, Address, Env};
 
@@ -430,6 +520,22 @@ pub enum Error {
     NotAnonymousEscrow = 36,
     /// Use get_escrow_info_v2 for anonymous escrows
     UseGetEscrowInfoV2ForAnonymous = 37,
+    /// Returned when escrow is locked by owner/admin (Issue #675)
+    EscrowLocked = 38,
+    /// Returned when clone source not found or invalid (Issue #678)
+    CloneSourceNotFound = 39,
+    /// Returned when archive cooldown has not elapsed (Issue #684)
+    ArchiveCooldownNotElapsed = 40,
+    /// Returned when escrow cannot be renewed (wrong status, archived, etc.) (Issue #679)
+    RenewalNotAllowed = 41,
+    /// Returned when renewal parameters are invalid (Issue #679)
+    InvalidRenewal = 42,
+    /// Returned when a requested release schedule cannot be found
+    ScheduleNotFound = 43,
+    /// Returned when a schedule has already been released
+    ScheduleAlreadyReleased = 44,
+    /// Returned when attempting to release a schedule before its timestamp
+    ScheduleNotDue = 45,
 }
 
 #[contracttype]
@@ -523,6 +629,19 @@ pub enum DataKey {
 
     /// Address of the resolver that may authorize refunds for anonymous escrows
     AnonymousResolver,
+    // Time-based release schedule metadata
+    ReleaseSchedule(u64, u64),        // (bounty_id, schedule_id) -> EscrowReleaseSchedule
+    ReleaseHistory(u64),              // bounty_id -> Vec<EscrowReleaseHistory>
+    NextScheduleId(u64),              // bounty_id -> next schedule id
+
+    /// Per-escrow owner lock (Issue #675): bounty_id -> EscrowLockState
+    EscrowLock(u64),
+    /// Completion timestamp for terminal state (Issue #684): bounty_id -> u64
+    CompletedAt(u64),
+    /// Archived flag (Issue #684): bounty_id -> bool
+    Archived(u64),
+    /// Auto-archive config: enabled + cooldown_seconds
+    AutoArchiveConfig,
 
     /// Chain identifier (e.g., "stellar", "ethereum") for cross-network protection
     ChainId,
@@ -720,6 +839,41 @@ pub struct RefundRecord {
     pub recipient: Address,
     pub timestamp: u64,
     pub mode: RefundMode,
+}
+
+// ------------------------------------------------------------------------
+// Time-based release schedule support
+// ------------------------------------------------------------------------
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReleaseType {
+    Automatic,
+    Manual,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowReleaseSchedule {
+    pub schedule_id: u64,
+    pub amount: i128,
+    pub release_timestamp: u64,
+    pub recipient: Address,
+    pub released: bool,
+    pub released_at: Option<u64>,
+    pub released_by: Option<Address>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowReleaseHistory {
+    pub schedule_id: u64,
+    pub bounty_id: u64,
+    pub amount: i128,
+    pub recipient: Address,
+    pub released_at: u64,
+    pub released_by: Address,
+    pub release_type: ReleaseType,
 }
 
 /// Single-use claim ticket for bounty winners
@@ -2526,6 +2680,376 @@ impl BountyEscrowContract {
 
         reentrancy_guard::release(&env);
         Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Time-based release schedules for individual escrows
+    // ------------------------------------------------------------------
+
+    pub fn get_next_schedule_id(env: &Env, bounty_id: u64) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextScheduleId(bounty_id))
+            .unwrap_or(1_u64)
+    }
+
+    pub fn get_all_release_schedules(env: Env, bounty_id: u64) -> Vec<EscrowReleaseSchedule> {
+        let mut schedules = Vec::new(&env);
+        let next_id: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NextScheduleId(bounty_id))
+            .unwrap_or(1);
+
+        for schedule_id in 1..next_id {
+            if env
+                .storage()
+                .persistent()
+                .has(&DataKey::ReleaseSchedule(bounty_id, schedule_id))
+            {
+                let schedule: EscrowReleaseSchedule = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::ReleaseSchedule(bounty_id, schedule_id))
+                    .unwrap();
+                schedules.push_back(schedule);
+            }
+        }
+
+        schedules
+    }
+
+    pub fn get_pending_release_schedules(env: Env, bounty_id: u64) -> Vec<EscrowReleaseSchedule> {
+        let all = Self::get_all_release_schedules(env.clone(), bounty_id);
+        let mut pending = Vec::new(&env);
+        for s in all.iter() {
+            if !s.released {
+                pending.push_back(s.clone());
+            }
+        }
+        pending
+    }
+
+    pub fn create_release_schedule(
+        env: Env,
+        bounty_id: u64,
+        amount: i128,
+        release_timestamp: u64,
+        recipient: Address,
+    ) -> Result<EscrowReleaseSchedule, Error> {
+        // Only admin can create schedules
+        if !env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::NotInitialized);
+        }
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        if !env.storage().persistent().has(&DataKey::Escrow(bounty_id)) {
+            return Err(Error::BountyNotFound);
+        }
+
+        // Ensure there are sufficient unreserved funds for the schedule
+        let mut scheduled_total: i128 = 0;
+        let existing = Self::get_all_release_schedules(env.clone(), bounty_id);
+        for s in existing.iter() {
+            if !s.released {
+                scheduled_total = scheduled_total.checked_add(s.amount).unwrap();
+            }
+        }
+
+        let mut escrow: Escrow = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Escrow(bounty_id))
+            .unwrap();
+
+        if scheduled_total + amount > escrow.remaining_amount {
+            return Err(Error::InsufficientFunds);
+        }
+
+        // Allocate schedule id and persist
+        let schedule_id: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::NextScheduleId(bounty_id))
+            .unwrap_or(1_u64);
+
+        let schedule = EscrowReleaseSchedule {
+            schedule_id,
+            amount,
+            release_timestamp,
+            recipient: recipient.clone(),
+            released: false,
+            released_at: None,
+            released_by: None,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReleaseSchedule(bounty_id, schedule_id), &schedule);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::NextScheduleId(bounty_id), &(schedule_id + 1));
+
+        events::emit_schedule_created(
+            &env,
+            events::ScheduleCreated {
+                bounty_id,
+                schedule_id,
+                amount,
+                recipient,
+                release_timestamp,
+                created_by: admin.clone(),
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
+        Ok(schedule)
+    }
+
+    pub fn release_schedule_automatic(env: Env, bounty_id: u64, schedule_id: u64) -> Result<(), Error> {
+        if Self::check_paused(&env, symbol_short!("release")) {
+            return Err(Error::FundsPaused);
+        }
+        if Self::is_escrow_locked(&env, bounty_id) {
+            return Err(Error::EscrowLocked);
+        }
+
+        // anyone can call automatic release after timestamp
+        if !env.storage().persistent().has(&DataKey::ReleaseSchedule(bounty_id, schedule_id)) {
+            return Err(Error::ScheduleNotFound);
+        }
+
+        let mut schedule: EscrowReleaseSchedule = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ReleaseSchedule(bounty_id, schedule_id))
+            .unwrap();
+
+        if schedule.released {
+            return Err(Error::ScheduleAlreadyReleased);
+        }
+
+        let now = env.ledger().timestamp();
+        if now < schedule.release_timestamp {
+            return Err(Error::ScheduleNotDue);
+        }
+
+        if !env.storage().persistent().has(&DataKey::Escrow(bounty_id)) {
+            return Err(Error::BountyNotFound);
+        }
+
+        // GUARD: acquire reentrancy lock
+        reentrancy_guard::acquire(&env);
+
+        let mut escrow: Escrow = env.storage().persistent().get(&DataKey::Escrow(bounty_id)).unwrap();
+        if schedule.amount > escrow.remaining_amount {
+            reentrancy_guard::release(&env);
+            return Err(Error::InsufficientFunds);
+        }
+
+        // EFFECTS: update state before external call
+        escrow.remaining_amount = escrow.remaining_amount.checked_sub(schedule.amount).unwrap();
+        if escrow.remaining_amount == 0 {
+            escrow.status = EscrowStatus::Released;
+            let now_ts = env.ledger().timestamp();
+            env.storage()
+                .persistent()
+                .set(&DataKey::CompletedAt(bounty_id), &now_ts);
+        }
+        env.storage().persistent().set(&DataKey::Escrow(bounty_id), &escrow);
+
+        // INTERACTION: token transfer
+        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&env.current_contract_address(), &schedule.recipient, &schedule.amount);
+
+        // Update schedule metadata
+        schedule.released = true;
+        schedule.released_at = Some(now);
+        schedule.released_by = Some(env.current_contract_address());
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReleaseSchedule(bounty_id, schedule_id), &schedule);
+
+        // Add to history
+        let history_entry = EscrowReleaseHistory {
+            schedule_id,
+            bounty_id,
+            amount: schedule.amount,
+            recipient: schedule.recipient.clone(),
+            released_at: now,
+            released_by: env.current_contract_address(),
+            release_type: ReleaseType::Automatic,
+        };
+
+        let mut history: Vec<EscrowReleaseHistory> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ReleaseHistory(bounty_id))
+            .unwrap_or(vec![&env]);
+        history.push_back(history_entry);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReleaseHistory(bounty_id), &history);
+
+        // Emit events
+        events::emit_schedule_released(
+            &env,
+            events::ScheduleReleased {
+                bounty_id,
+                schedule_id,
+                amount: schedule.amount,
+                recipient: schedule.recipient.clone(),
+                released_at: now,
+                released_by: env.current_contract_address(),
+                release_type: ReleaseType::Automatic,
+            },
+        );
+
+        events::emit_funds_released(
+            &env,
+            FundsReleased {
+                version: EVENT_VERSION_V2,
+                bounty_id,
+                amount: schedule.amount,
+                recipient: schedule.recipient.clone(),
+                timestamp: now,
+            },
+        );
+
+        // GUARD: release reentrancy lock
+        reentrancy_guard::release(&env);
+        Ok(())
+    }
+
+    pub fn release_schedule_manual(env: Env, bounty_id: u64, schedule_id: u64) -> Result<(), Error> {
+        if Self::check_paused(&env, symbol_short!("release")) {
+            return Err(Error::FundsPaused);
+        }
+        if Self::is_escrow_locked(&env, bounty_id) {
+            return Err(Error::EscrowLocked);
+        }
+
+        if !env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::NotInitialized);
+        }
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        if !env.storage().persistent().has(&DataKey::ReleaseSchedule(bounty_id, schedule_id)) {
+            return Err(Error::ScheduleNotFound);
+        }
+
+        let mut schedule: EscrowReleaseSchedule = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ReleaseSchedule(bounty_id, schedule_id))
+            .unwrap();
+
+        if schedule.released {
+            return Err(Error::ScheduleAlreadyReleased);
+        }
+
+        if !env.storage().persistent().has(&DataKey::Escrow(bounty_id)) {
+            return Err(Error::BountyNotFound);
+        }
+
+        // GUARD: acquire reentrancy lock
+        reentrancy_guard::acquire(&env);
+
+        let mut escrow: Escrow = env.storage().persistent().get(&DataKey::Escrow(bounty_id)).unwrap();
+        if schedule.amount > escrow.remaining_amount {
+            reentrancy_guard::release(&env);
+            return Err(Error::InsufficientFunds);
+        }
+
+        // EFFECTS: update state before external call
+        escrow.remaining_amount = escrow.remaining_amount.checked_sub(schedule.amount).unwrap();
+        if escrow.remaining_amount == 0 {
+            escrow.status = EscrowStatus::Released;
+            let now_ts = env.ledger().timestamp();
+            env.storage()
+                .persistent()
+                .set(&DataKey::CompletedAt(bounty_id), &now_ts);
+        }
+        env.storage().persistent().set(&DataKey::Escrow(bounty_id), &escrow);
+
+        // INTERACTION: token transfer
+        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(&env.current_contract_address(), &schedule.recipient, &schedule.amount);
+
+        // Update schedule metadata
+        let now = env.ledger().timestamp();
+        schedule.released = true;
+        schedule.released_at = Some(now);
+        schedule.released_by = Some(admin.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReleaseSchedule(bounty_id, schedule_id), &schedule);
+
+        // Add to history
+        let history_entry = EscrowReleaseHistory {
+            schedule_id,
+            bounty_id,
+            amount: schedule.amount,
+            recipient: schedule.recipient.clone(),
+            released_at: now,
+            released_by: admin.clone(),
+            release_type: ReleaseType::Manual,
+        };
+
+        let mut history: Vec<EscrowReleaseHistory> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ReleaseHistory(bounty_id))
+            .unwrap_or(vec![&env]);
+        history.push_back(history_entry);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReleaseHistory(bounty_id), &history);
+
+        // Emit events
+        events::emit_schedule_released(
+            &env,
+            events::ScheduleReleased {
+                bounty_id,
+                schedule_id,
+                amount: schedule.amount,
+                recipient: schedule.recipient.clone(),
+                released_at: now,
+                released_by: admin.clone(),
+                release_type: ReleaseType::Manual,
+            },
+        );
+
+        events::emit_funds_released(
+            &env,
+            FundsReleased {
+                version: EVENT_VERSION_V2,
+                bounty_id,
+                amount: schedule.amount,
+                recipient: schedule.recipient.clone(),
+                timestamp: now,
+            },
+        );
+
+        // GUARD: release reentrancy lock
+        reentrancy_guard::release(&env);
+        Ok(())
+    }
+
+    pub fn get_release_history(env: Env, bounty_id: u64) -> Vec<EscrowReleaseHistory> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ReleaseHistory(bounty_id))
+            .unwrap_or(vec![&env])
     }
 
     /// Refund funds to the original depositor if the deadline has passed.

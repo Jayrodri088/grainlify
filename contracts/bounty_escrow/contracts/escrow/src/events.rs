@@ -63,6 +63,44 @@ pub fn emit_funds_released(env: &Env, event: FundsReleased) {
     env.events().publish(topics, event.clone());
 }
 
+// ------------------------------------------------------------------------
+// Scheduled release events
+// ------------------------------------------------------------------------
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ScheduleCreated {
+    pub bounty_id: u64,
+    pub schedule_id: u64,
+    pub amount: i128,
+    pub recipient: Address,
+    pub release_timestamp: u64,
+    pub created_by: Address,
+    pub timestamp: u64,
+}
+
+pub fn emit_schedule_created(env: &Env, event: ScheduleCreated) {
+    let topics = (symbol_short!("sch_cr"), event.bounty_id, event.schedule_id);
+    env.events().publish(topics, event.clone());
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ScheduleReleased {
+    pub bounty_id: u64,
+    pub schedule_id: u64,
+    pub amount: i128,
+    pub recipient: Address,
+    pub released_at: u64,
+    pub released_by: Address,
+    pub release_type: crate::ReleaseType,
+}
+
+pub fn emit_schedule_released(env: &Env, event: ScheduleReleased) {
+    let topics = (symbol_short!("sch_rel"), event.bounty_id, event.schedule_id);
+    env.events().publish(topics, event.clone());
+}
+
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct FundsRefunded {

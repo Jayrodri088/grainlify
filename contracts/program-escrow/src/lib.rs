@@ -1398,6 +1398,12 @@ impl ProgramEscrowContract {
             panic!("Funds Paused");
         }
 
+        // Check circuit breaker with thresholds
+        if let Err(_) = error_recovery::check_and_allow_with_thresholds(&env) {
+            reentrancy_guard::clear_entered(&env);
+            panic!("Circuit breaker open or threshold breached");
+        }
+
         Self::assert_dependencies_satisfied(&env, &program_id);
 
         // Apply rate limiting to the authorized payout key
@@ -1432,6 +1438,11 @@ impl ProgramEscrowContract {
                 reentrancy_guard::clear_entered(&env);
                 panic!("All amounts must be greater than zero");
             }
+            // Check single payout threshold
+            if let Err(_) = threshold_monitor::check_single_payout_threshold(&env, amount) {
+                reentrancy_guard::clear_entered(&env);
+                panic!("Single payout exceeds threshold");
+            }
             total_payout = total_payout.checked_add(amount).unwrap_or_else(|| {
                 reentrancy_guard::clear_entered(&env);
                 panic!("Payout amount overflow")
@@ -1464,6 +1475,9 @@ impl ProgramEscrowContract {
                 timestamp,
             };
             updated_history.push_back(payout_record);
+            
+            // Record outflow for threshold monitoring
+            threshold_monitor::record_outflow(&env, amount);
         }
 
         // Update program data
@@ -1485,6 +1499,9 @@ impl ProgramEscrowContract {
                 remaining_balance: updated_data.remaining_balance,
             },
         );
+
+        // Record successful operation
+        threshold_monitor::record_operation_success(&env);
 
         // Clear reentrancy guard before returning
         reentrancy_guard::clear_entered(&env);
@@ -1527,6 +1544,12 @@ impl ProgramEscrowContract {
             panic!("Funds Paused");
         }
 
+        // Check circuit breaker with thresholds
+        if let Err(_) = error_recovery::check_and_allow_with_thresholds(&env) {
+            reentrancy_guard::clear_entered(&env);
+            panic!("Circuit breaker open or threshold breached");
+        }
+
         // Verify authorization
         let program_data: ProgramData =
             env.storage()
@@ -1543,6 +1566,12 @@ impl ProgramEscrowContract {
         if amount <= 0 {
             reentrancy_guard::clear_entered(&env);
             panic!("Amount must be greater than zero");
+        }
+
+        // Check single payout threshold
+        if let Err(_) = threshold_monitor::check_single_payout_threshold(&env, amount) {
+            reentrancy_guard::clear_entered(&env);
+            panic!("Single payout exceeds threshold");
         }
 
         // Validate sufficient balance
@@ -1586,6 +1615,10 @@ impl ProgramEscrowContract {
                 remaining_balance: updated_data.remaining_balance,
             },
         );
+
+        // Record outflow and success for threshold monitoring
+        threshold_monitor::record_outflow(&env, amount);
+        threshold_monitor::record_operation_success(&env);
 
         // Clear reentrancy guard before returning
         reentrancy_guard::clear_entered(&env);

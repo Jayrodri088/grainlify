@@ -269,6 +269,9 @@ mod test_token_math;
 mod test_circuit_breaker_audit;
 
 #[cfg(test)]
+mod test_threshold_monitor;
+
+#[cfg(test)]
 mod error_recovery_tests;
 
 #[cfg(any())]

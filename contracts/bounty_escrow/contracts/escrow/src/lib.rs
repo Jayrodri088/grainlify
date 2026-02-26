@@ -482,6 +482,9 @@ pub enum DataKey {
     ClaimWindow,                 // u64 seconds (global config)
     PauseFlags,                  // PauseFlags struct
     AmountPolicy, // Option<(i128, i128)> — (min_amount, max_amount) set by set_amount_policy
+    PromotionalPeriod(u64), // id -> PromotionalPeriod
+    ActivePromotions,       // Vec<u64> of active promotion IDs
+    PromotionCounter,       // u64 counter for generating promotion IDs
     ClaimTicket(u64), // ticket_id -> ClaimTicket
     ClaimTicketIndex, // Vec<u64> of all ticket_ids
     TicketCounter, // u64 counter for generating unique ticket_ids
@@ -577,6 +580,20 @@ pub struct FeeConfig {
     pub release_fee_rate: i128,
     pub fee_recipient: Address,
     pub fee_enabled: bool,
+}
+
+/// Promotional period configuration for fee holidays
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromotionalPeriod {
+    pub id: u64,
+    pub name: soroban_sdk::String,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub lock_fee_rate: i128,      // Promotional lock fee rate (can be 0 for free)
+    pub release_fee_rate: i128,   // Promotional release fee rate (can be 0 for free)
+    pub is_global: bool,          // If true, applies to all operations
+    pub enabled: bool,            // Can be disabled without deleting
 }
 
 #[contracttype]

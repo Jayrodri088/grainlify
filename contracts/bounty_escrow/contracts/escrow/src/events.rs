@@ -223,6 +223,62 @@ pub fn emit_emergency_withdraw(env: &Env, event: EmergencyWithdrawEvent) {
 }
 
 #[contracttype]
+#[derive(Clone, Debug)]
+pub struct PromotionalPeriodCreated {
+    pub id: u64,
+    pub name: soroban_sdk::String,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub lock_fee_rate: i128,
+    pub release_fee_rate: i128,
+    pub is_global: bool,
+    pub timestamp: u64,
+}
+
+pub fn emit_promotional_period_created(env: &Env, event: PromotionalPeriodCreated) {
+    let topics = (symbol_short!("promo_c"), event.id);
+    env.events().publish(topics, event.clone());
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PromotionalPeriodUpdated {
+    pub id: u64,
+    pub enabled: bool,
+    pub timestamp: u64,
+}
+
+pub fn emit_promotional_period_updated(env: &Env, event: PromotionalPeriodUpdated) {
+    let topics = (symbol_short!("promo_u"), event.id);
+    env.events().publish(topics, event.clone());
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PromotionalPeriodActivated {
+    pub id: u64,
+    pub name: soroban_sdk::String,
+    pub lock_fee_rate: i128,
+    pub release_fee_rate: i128,
+    pub timestamp: u64,
+}
+
+pub fn emit_promotional_period_activated(env: &Env, event: PromotionalPeriodActivated) {
+    let topics = (symbol_short!("promo_a"), event.id);
+    env.events().publish(topics, event.clone());
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PromotionalPeriodExpired {
+    pub id: u64,
+    pub name: soroban_sdk::String,
+    pub timestamp: u64,
+}
+
+pub fn emit_promotional_period_expired(env: &Env, event: PromotionalPeriodExpired) {
+    let topics = (symbol_short!("promo_e"), event.id);
+    env.events().publish(topics, event.clone());
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapabilityIssued {
     pub capability_id: u64,

@@ -22,10 +22,10 @@ mod traits;
 
 use events::{
     emit_batch_funds_locked, emit_batch_funds_released, emit_bounty_initialized, emit_funds_locked,
-    emit_funds_refunded, emit_funds_released, emit_ticket_claimed, emit_ticket_issued,
-    BatchFundsLocked, BatchFundsReleased, BountyEscrowInitialized, ClaimCancelled, ClaimCreated,
-    ClaimExecuted, FundsLocked, FundsRefunded, FundsReleased, TicketClaimed, TicketIssued,
-    EVENT_VERSION_V2,
+    emit_funds_refunded, emit_funds_released, emit_operation_receipt, emit_ticket_claimed,
+    emit_ticket_issued, BatchFundsLocked, BatchFundsReleased, BountyEscrowInitialized,
+    ClaimCancelled, ClaimCreated, ClaimExecuted, CriticalOperationOutcome, CriticalOperationReceipt,
+    FundsLocked, FundsRefunded, FundsReleased, TicketClaimed, TicketIssued, EVENT_VERSION_V2,
 };
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, vec, Address, Env,
@@ -478,6 +478,11 @@ pub enum DataKey {
 
     /// Network identifier (e.g., "mainnet", "testnet", "futurenet") for environment-specific behavior
     NetworkId,
+
+    /// Optional require-receipt (Issue #677): monotonic counter for receipt ids
+    ReceiptCounter,
+    /// Optional require-receipt: receipt_id -> CriticalOperationReceipt (stored for on-chain verify_receipt)
+    Receipt(u64),
 }
 
 #[contracttype]
@@ -1032,6 +1037,39 @@ impl BountyEscrowContract {
             .instance()
             .set(&DataKey::CapabilityNonce, &next_id);
         next_id
+    }
+
+    /// Issue #677: Record a receipt for a critical operation (release/refund), emit it, and store for on-chain verification.
+    fn record_receipt(
+        env: &Env,
+        outcome: CriticalOperationOutcome,
+        bounty_id: u64,
+        amount: i128,
+        party: Address,
+    ) -> u64 {
+        let receipt_id: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ReceiptCounter)
+            .unwrap_or(0u64)
+            .saturating_add(1u64);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ReceiptCounter, &receipt_id);
+        let timestamp = env.ledger().timestamp();
+        let receipt = CriticalOperationReceipt {
+            receipt_id,
+            outcome,
+            bounty_id,
+            amount,
+            party,
+            timestamp,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::Receipt(receipt_id), &receipt);
+        emit_operation_receipt(env, receipt);
+        receipt_id
     }
 
     fn load_capability(env: &Env, capability_id: u64) -> Result<Capability, Error> {
@@ -1713,6 +1751,7 @@ impl BountyEscrowContract {
             &release_amount,
         );
 
+        let timestamp = env.ledger().timestamp();
         emit_funds_released(
             &env,
             FundsReleased {
@@ -1720,8 +1759,15 @@ impl BountyEscrowContract {
                 bounty_id,
                 amount: release_amount,
                 recipient: contributor.clone(),
-                timestamp: env.ledger().timestamp(),
+                timestamp,
             },
+        );
+        Self::record_receipt(
+            &env,
+            CriticalOperationOutcome::Released,
+            bounty_id,
+            release_amount,
+            contributor,
         );
 
         // INV-2: Verify aggregate balance matches token balance after release
@@ -1789,15 +1835,23 @@ impl BountyEscrowContract {
             .persistent()
             .set(&DataKey::Escrow(bounty_id), &escrow);
 
+        let timestamp = env.ledger().timestamp();
         emit_funds_released(
             &env,
             FundsReleased {
                 version: EVENT_VERSION_V2,
                 bounty_id,
                 amount: payout_amount,
-                recipient: contributor,
-                timestamp: env.ledger().timestamp(),
+                recipient: contributor.clone(),
+                timestamp,
             },
+        );
+        Self::record_receipt(
+            &env,
+            CriticalOperationOutcome::Released,
+            bounty_id,
+            payout_amount,
+            contributor,
         );
 
         Ok(())
@@ -2215,6 +2269,7 @@ impl BountyEscrowContract {
             &payout_amount,
         );
 
+        let timestamp = env.ledger().timestamp();
         events::emit_funds_released(
             &env,
             FundsReleased {
@@ -2222,8 +2277,15 @@ impl BountyEscrowContract {
                 bounty_id,
                 amount: payout_amount,
                 recipient: contributor.clone(),
-                timestamp: env.ledger().timestamp(),
+                timestamp,
             },
+        );
+        Self::record_receipt(
+            &env,
+            CriticalOperationOutcome::Released,
+            bounty_id,
+            payout_amount,
+            contributor,
         );
 
         // GUARD: release reentrancy lock
@@ -2357,6 +2419,13 @@ impl BountyEscrowContract {
                 timestamp: now,
             },
         );
+        Self::record_receipt(
+            &env,
+            CriticalOperationOutcome::Refunded,
+            bounty_id,
+            refund_amount,
+            refund_to.clone(),
+        );
 
         // INV-2: Verify aggregate balance matches token balance after refund
         multitoken_invariants::assert_after_disbursement(&env);
@@ -2458,9 +2527,16 @@ impl BountyEscrowContract {
                 version: EVENT_VERSION_V2,
                 bounty_id,
                 amount,
-                refund_to,
+                refund_to: refund_to.clone(),
                 timestamp: now,
             },
+        );
+        Self::record_receipt(
+            &env,
+            CriticalOperationOutcome::Refunded,
+            bounty_id,
+            amount,
+            refund_to,
         );
 
         Ok(())
@@ -2476,6 +2552,14 @@ impl BountyEscrowContract {
             .persistent()
             .get(&DataKey::Escrow(bounty_id))
             .unwrap())
+    }
+
+    /// Issue #677: On-chain verification of a critical operation receipt.
+    /// Returns the stored receipt if it exists; callers can use it to prove completion off-chain or verify on-chain.
+    pub fn verify_receipt(env: Env, receipt_id: u64) -> Option<CriticalOperationReceipt> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Receipt(receipt_id))
     }
 
     /// view function to get contract balance of the token
@@ -3527,6 +3611,13 @@ impl BountyEscrowContract {
                     timestamp,
                 },
             );
+            Self::record_receipt(
+                &env,
+                CriticalOperationOutcome::Released,
+                item.bounty_id,
+                amount,
+                contributor.clone(),
+            );
         }
 
         // Emit batch event
@@ -4432,3 +4523,5 @@ mod test_deadline_variants;
 mod test_query_filters;
 #[cfg(test)]
 mod test_status_transitions;
+#[cfg(test)]
+mod test_receipts;

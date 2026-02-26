@@ -22,12 +22,13 @@ mod traits;
 
 use events::{
     emit_batch_funds_locked, emit_batch_funds_released, emit_bounty_initialized,
-    emit_escrow_archived, emit_escrow_cloned, emit_escrow_locked, emit_escrow_unlocked,
-    emit_event_batch, emit_funds_locked, emit_funds_refunded, emit_funds_released,
-    emit_ticket_claimed, emit_ticket_issued, ActionSummary, BatchFundsLocked, BatchFundsReleased,
-    BountyEscrowInitialized, ClaimCancelled, ClaimCreated, ClaimExecuted, EscrowArchivedEvent,
-    EscrowClonedEvent, EscrowLockedEvent, EscrowUnlockedEvent, EventBatch, FundsLocked,
-    FundsRefunded, FundsReleased, TicketClaimed, TicketIssued, EVENT_VERSION_V2,
+    emit_escrow_archived, emit_escrow_cloned, emit_escrow_locked, emit_escrow_renewed,
+    emit_escrow_unlocked, emit_event_batch, emit_funds_locked, emit_funds_refunded,
+    emit_funds_released, emit_new_cycle_created, emit_ticket_claimed, emit_ticket_issued,
+    ActionSummary, BatchFundsLocked, BatchFundsReleased, BountyEscrowInitialized, ClaimCancelled,
+    ClaimCreated, ClaimExecuted, EscrowArchivedEvent, EscrowClonedEvent, EscrowLockedEvent,
+    EscrowRenewedEvent, EscrowUnlockedEvent, EventBatch, FundsLocked, FundsRefunded, FundsReleased,
+    NewCycleCreatedEvent, TicketClaimed, TicketIssued, EVENT_VERSION_V2,
 };
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, vec, Address, Env,
@@ -432,6 +433,10 @@ pub enum Error {
     CloneSourceNotFound = 35,
     /// Returned when archive cooldown has not elapsed (Issue #684)
     ArchiveCooldownNotElapsed = 36,
+    /// Returned when escrow cannot be renewed (wrong status, archived, etc.) (Issue #679)
+    RenewalNotAllowed = 37,
+    /// Returned when renewal parameters are invalid (Issue #679)
+    InvalidRenewal = 38,
 }
 
 #[contracttype]
@@ -485,8 +490,8 @@ pub enum DataKey {
     PauseFlags,                  // PauseFlags struct
     AmountPolicy, // Option<(i128, i128)> — (min_amount, max_amount) set by set_amount_policy
     PromotionalPeriod(u64), // id -> PromotionalPeriod
-    ActivePromotions,       // Vec<u64> of active promotion IDs
-    PromotionCounter,       // u64 counter for generating promotion IDs
+    ActivePromotions, // Vec<u64> of active promotion IDs
+    PromotionCounter, // u64 counter for generating promotion IDs
     ClaimTicket(u64), // ticket_id -> ClaimTicket
     ClaimTicketIndex, // Vec<u64> of all ticket_ids
     TicketCounter, // u64 counter for generating unique ticket_ids
@@ -508,6 +513,13 @@ pub enum DataKey {
 
     /// Network identifier (e.g., "mainnet", "testnet", "futurenet") for environment-specific behavior
     NetworkId,
+
+    /// Renewal history for an escrow (Issue #679): bounty_id -> Vec<RenewalRecord>
+    RenewalHistory(u64),
+    /// Link between predecessor and successor cycles (Issue #679): bounty_id -> CycleLink
+    CycleLink(u64),
+    /// How many times an escrow has been renewed (Issue #679): bounty_id -> u32
+    CycleCount(u64),
 }
 
 #[contracttype]
@@ -592,10 +604,10 @@ pub struct PromotionalPeriod {
     pub name: soroban_sdk::String,
     pub start_time: u64,
     pub end_time: u64,
-    pub lock_fee_rate: i128,      // Promotional lock fee rate (can be 0 for free)
-    pub release_fee_rate: i128,   // Promotional release fee rate (can be 0 for free)
-    pub is_global: bool,          // If true, applies to all operations
-    pub enabled: bool,            // Can be disabled without deleting
+    pub lock_fee_rate: i128, // Promotional lock fee rate (can be 0 for free)
+    pub release_fee_rate: i128, // Promotional release fee rate (can be 0 for free)
+    pub is_global: bool,     // If true, applies to all operations
+    pub enabled: bool,       // Can be disabled without deleting
 }
 
 #[contracttype]
@@ -746,6 +758,33 @@ pub struct LockFundsItem {
 pub struct ReleaseFundsItem {
     pub bounty_id: u64,
     pub contributor: Address,
+}
+/// A record of a single renewal event (Issue #679)
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenewalRecord {
+    /// Which renewal cycle this was (1-indexed)
+    pub cycle: u32,
+    /// Previous deadline before renewal
+    pub old_deadline: u64,
+    /// New deadline after renewal
+    pub new_deadline: u64,
+    /// Additional funds added (can be 0 for deadline-only extensions)
+    pub additional_amount: i128,
+    /// Timestamp of the renewal
+    pub renewed_at: u64,
+}
+
+/// Link between escrow cycles (Issue #679)
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CycleLink {
+    /// Bounty ID of the previous cycle (0 if this is the first)
+    pub previous_id: u64,
+    /// Bounty ID of the next cycle (0 if this is the latest)
+    pub next_id: u64,
+    /// Cycle number (1-indexed)
+    pub cycle: u32,
 }
 
 #[contract]
@@ -2602,7 +2641,6 @@ impl BountyEscrowContract {
             .persistent()
             .set(&DataKey::Escrow(bounty_id), &escrow);
 
-
         // INTERACTION: external token transfer is last (CEI pattern)
         client.transfer(
             &env.current_contract_address(),
@@ -2610,8 +2648,6 @@ impl BountyEscrowContract {
             &payout_amount,
         );
 
-
-     
         // INTERACTION: external token transfer is last (single transfer; state already updated above)
         events::emit_funds_released(
             &env,
@@ -3818,10 +3854,6 @@ impl BountyEscrowContract {
             BatchFundsLocked {
                 version: EVENT_VERSION_V2,
                 count: locked_count,
-                total_amount: items
-                    .iter()
-                    .try_fold(0i128, |acc, i| acc.checked_add(i.amount))
-                    .unwrap(),
                 total_amount,
                 timestamp,
             },
@@ -4380,6 +4412,372 @@ impl BountyEscrowContract {
             (false, false, false)
         }
     }
+
+    // ==================== Renew / Rollover (Issue #679) ====================
+
+    /// Renew (extend) an existing escrow by pushing its deadline forward
+    /// and optionally topping up with additional funds.
+    ///
+    /// # Rules
+    /// - Only the admin can renew an escrow.
+    /// - The escrow must be in `Locked` or `PartiallyRefunded` status.
+    /// - The escrow must not be archived.
+    /// - `new_deadline` must be strictly in the future and after the old deadline.
+    /// - `additional_amount` can be 0 for a deadline-only extension.
+    ///
+    /// # Audit Trail
+    /// Each renewal is recorded in `RenewalHistory(bounty_id)` and the cycle
+    /// counter is incremented.
+    pub fn renew_escrow(
+        env: Env,
+        bounty_id: u64,
+        new_deadline: u64,
+        additional_amount: i128,
+    ) -> Result<(), Error> {
+        // Auth: admin only
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        // Must not be archived
+        if env
+            .storage()
+            .persistent()
+            .get::<DataKey, bool>(&DataKey::Archived(bounty_id))
+            .unwrap_or(false)
+        {
+            return Err(Error::RenewalNotAllowed);
+        }
+
+        // Load escrow
+        let mut escrow: Escrow = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Escrow(bounty_id))
+            .ok_or(Error::BountyNotFound)?;
+
+        // Only Locked or PartiallyRefunded escrows can be renewed
+        if escrow.status != EscrowStatus::Locked && escrow.status != EscrowStatus::PartiallyRefunded
+        {
+            return Err(Error::RenewalNotAllowed);
+        }
+
+        // Validate new deadline
+        let now = env.ledger().timestamp();
+        if new_deadline <= now || new_deadline <= escrow.deadline {
+            return Err(Error::InvalidRenewal);
+        }
+
+        // Validate additional amount
+        if additional_amount < 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let old_deadline = escrow.deadline;
+
+        // Update deadline
+        escrow.deadline = new_deadline;
+
+        // If topping up, transfer additional funds
+        if additional_amount > 0 {
+            escrow.amount += additional_amount;
+            escrow.remaining_amount += additional_amount;
+
+            // Depositor must authorize the top-up transfer
+            escrow.depositor.require_auth();
+
+            let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+            let client = token::Client::new(&env, &token_addr);
+            client.transfer(
+                &escrow.depositor,
+                &env.current_contract_address(),
+                &additional_amount,
+            );
+        }
+
+        // Increment cycle count
+        let cycle: u32 = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u32>(&DataKey::CycleCount(bounty_id))
+            .unwrap_or(0)
+            + 1;
+        env.storage()
+            .persistent()
+            .set(&DataKey::CycleCount(bounty_id), &cycle);
+
+        // Append to renewal history
+        let record = RenewalRecord {
+            cycle,
+            old_deadline,
+            new_deadline,
+            additional_amount,
+            renewed_at: now,
+        };
+        let mut history: Vec<RenewalRecord> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RenewalHistory(bounty_id))
+            .unwrap_or(Vec::new(&env));
+        history.push_back(record);
+        env.storage()
+            .persistent()
+            .set(&DataKey::RenewalHistory(bounty_id), &history);
+
+        // Save updated escrow
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(bounty_id), &escrow);
+
+        // Emit event
+        emit_escrow_renewed(
+            &env,
+            EscrowRenewedEvent {
+                bounty_id,
+                old_deadline,
+                new_deadline,
+                additional_amount,
+                cycle,
+                renewed_at: now,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Create a new escrow cycle linked to a completed or refunded predecessor.
+    ///
+    /// This allows recurring programs (e.g. monthly bounties) to continue
+    /// without full re-setup. The new escrow inherits the depositor and
+    /// maintains a cycle chain for audit purposes.
+    ///
+    /// # Rules
+    /// - Only the admin can create a new cycle.
+    /// - The previous escrow must exist and be in a terminal state
+    ///   (`Released`, `Refunded`).
+    /// - The previous cycle must not already have a successor.
+    /// - `new_bounty_id` must not already exist.
+    /// - Standard lock validations apply (amount > 0, deadline in the future).
+    pub fn create_next_cycle(
+        env: Env,
+        previous_bounty_id: u64,
+        new_bounty_id: u64,
+        amount: i128,
+        deadline: u64,
+    ) -> Result<(), Error> {
+        // Auth: admin only
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        // Load previous escrow
+        let prev_escrow: Escrow = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Escrow(previous_bounty_id))
+            .ok_or(Error::BountyNotFound)?;
+
+        // Previous must be in terminal state
+        if prev_escrow.status != EscrowStatus::Released
+            && prev_escrow.status != EscrowStatus::Refunded
+        {
+            return Err(Error::RenewalNotAllowed);
+        }
+
+        // Previous must not already have a successor
+        if let Some(link) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, CycleLink>(&DataKey::CycleLink(previous_bounty_id))
+        {
+            if link.next_id != 0 {
+                return Err(Error::RenewalNotAllowed);
+            }
+        }
+
+        // New bounty must not already exist
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Escrow(new_bounty_id))
+        {
+            return Err(Error::BountyExists);
+        }
+
+        // Validate amount and deadline
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        let now = env.ledger().timestamp();
+        if deadline <= now {
+            return Err(Error::InvalidDeadline);
+        }
+
+        // Determine cycle number
+        let prev_cycle: u32 = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u32>(&DataKey::CycleCount(previous_bounty_id))
+            .unwrap_or(0);
+        let new_cycle = prev_cycle + 1;
+
+        // Create the new escrow (inherits depositor from previous)
+        let escrow = Escrow {
+            depositor: prev_escrow.depositor.clone(),
+            amount,
+            remaining_amount: amount,
+            status: EscrowStatus::Locked,
+            deadline,
+            refund_history: vec![&env],
+        };
+
+        // GUARD: acquire reentrancy lock
+        reentrancy_guard::acquire(&env);
+
+        // EFFECTS: write state before external call (CEI)
+        env.storage()
+            .persistent()
+            .set(&DataKey::Escrow(new_bounty_id), &escrow);
+
+        // Update EscrowIndex
+        let mut index: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EscrowIndex)
+            .unwrap_or(Vec::new(&env));
+        index.push_back(new_bounty_id);
+        env.storage()
+            .persistent()
+            .set(&DataKey::EscrowIndex, &index);
+
+        // Update DepositorIndex
+        let mut depositor_index: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DepositorIndex(prev_escrow.depositor.clone()))
+            .unwrap_or(Vec::new(&env));
+        depositor_index.push_back(new_bounty_id);
+        env.storage().persistent().set(
+            &DataKey::DepositorIndex(prev_escrow.depositor.clone()),
+            &depositor_index,
+        );
+
+        // Set cycle count on new escrow
+        env.storage()
+            .persistent()
+            .set(&DataKey::CycleCount(new_bounty_id), &new_cycle);
+
+        // Update cycle links:
+        // previous -> next_id = new_bounty_id
+        let prev_link = if let Some(existing) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, CycleLink>(&DataKey::CycleLink(previous_bounty_id))
+        {
+            CycleLink {
+                previous_id: existing.previous_id,
+                next_id: new_bounty_id,
+                cycle: existing.cycle,
+            }
+        } else {
+            CycleLink {
+                previous_id: 0,
+                next_id: new_bounty_id,
+                cycle: 1,
+            }
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::CycleLink(previous_bounty_id), &prev_link);
+
+        // new -> previous_id = previous_bounty_id
+        let new_link = CycleLink {
+            previous_id: previous_bounty_id,
+            next_id: 0,
+            cycle: new_cycle,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::CycleLink(new_bounty_id), &new_link);
+
+        // INTERACTION: transfer funds (depositor must authorize)
+        prev_escrow.depositor.require_auth();
+        let token_addr: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        let client = token::Client::new(&env, &token_addr);
+        client.transfer(
+            &prev_escrow.depositor,
+            &env.current_contract_address(),
+            &amount,
+        );
+
+        // Emit events
+        emit_funds_locked(
+            &env,
+            FundsLocked {
+                version: EVENT_VERSION_V2,
+                bounty_id: new_bounty_id,
+                amount,
+                depositor: prev_escrow.depositor.clone(),
+                deadline,
+            },
+        );
+
+        emit_new_cycle_created(
+            &env,
+            NewCycleCreatedEvent {
+                previous_bounty_id,
+                new_bounty_id,
+                cycle: new_cycle,
+                amount,
+                deadline,
+                created_at: now,
+            },
+        );
+
+        // GUARD: release reentrancy lock
+        reentrancy_guard::release(&env);
+        Ok(())
+    }
+
+    /// View: get the cycle linkage information for an escrow.
+    /// Returns the CycleLink if the escrow has been part of a renewal chain,
+    /// or an error if the escrow is not found.
+    pub fn get_cycle_info(env: Env, bounty_id: u64) -> Result<CycleLink, Error> {
+        if !env.storage().persistent().has(&DataKey::Escrow(bounty_id)) {
+            return Err(Error::BountyNotFound);
+        }
+
+        let link = env
+            .storage()
+            .persistent()
+            .get::<DataKey, CycleLink>(&DataKey::CycleLink(bounty_id))
+            .unwrap_or(CycleLink {
+                previous_id: 0,
+                next_id: 0,
+                cycle: 1,
+            });
+        Ok(link)
+    }
+
+    /// View: get the renewal history for an escrow.
+    pub fn get_renewal_history(env: Env, bounty_id: u64) -> Result<Vec<RenewalRecord>, Error> {
+        if !env.storage().persistent().has(&DataKey::Escrow(bounty_id)) {
+            return Err(Error::BountyNotFound);
+        }
+
+        let history: Vec<RenewalRecord> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RenewalHistory(bounty_id))
+            .unwrap_or(Vec::new(&env));
+        Ok(history)
+    }
 }
 
 impl traits::EscrowInterface for BountyEscrowContract {
@@ -4893,5 +5291,7 @@ mod test_deadline_variants;
 mod test_e2e_upgrade_with_pause;
 #[cfg(test)]
 mod test_query_filters;
+#[cfg(test)]
+mod test_renew_rollover;
 #[cfg(test)]
 mod test_status_transitions;

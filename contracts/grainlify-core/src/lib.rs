@@ -152,6 +152,7 @@
 
 #![no_std]
 
+pub mod asset;
 mod commit_reveal;
 mod governance;
 mod multisig;
@@ -159,7 +160,9 @@ pub use commit_reveal::{create_commitment, verify_reveal, Commitment, Error as C
 pub use governance::{
     Error as GovError, GovernanceConfig, Proposal, ProposalStatus, Vote, VoteType, VotingScheme,
 };
+#[allow(unused_imports)]
 use multisig::{MultiSig, MultiSigConfig};
+#[allow(unused_imports)]
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Symbol, Vec,
 };
@@ -1900,4 +1903,3 @@ mod test {
 
 // #[cfg(test)]
 // mod migration_hook_tests;
-

@@ -94,13 +94,17 @@ impl TestContext {
     }
 
     fn capture_state_snapshot(&self) -> StateSnapshot {
-        let admin = self.env.as_contract(&self.client.address, || {
-            self.env.storage().instance().get(&DataKey::Admin).unwrap()
+        let admin: Address = self.env.as_contract(&self.client.address, || {
+            self.env
+                .storage()
+                .instance()
+                .get::<DataKey, Address>(&DataKey::Admin)
+                .unwrap()
         });
         StateSnapshot {
             pause_flags: self.client.get_pause_flags(),
             contract_balance: self.get_contract_balance(),
-            admin: self.env.storage().instance().get(&DataKey::Admin).unwrap(),
+            admin,
         }
     }
 }

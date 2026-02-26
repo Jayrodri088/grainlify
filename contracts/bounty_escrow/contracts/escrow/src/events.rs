@@ -282,6 +282,9 @@ pub struct PromotionalPeriodExpired {
 pub fn emit_promotional_period_expired(env: &Env, event: PromotionalPeriodExpired) {
     let topics = (symbol_short!("promo_e"), event.id);
     env.events().publish(topics, event.clone());
+}
+
+#[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapabilityIssued {
     pub capability_id: u64,
@@ -414,5 +417,41 @@ pub struct EscrowArchivedEvent {
 
 pub fn emit_escrow_archived(env: &Env, event: EscrowArchivedEvent) {
     let topics = (symbol_short!("esc_arch"), event.bounty_id);
+    env.events().publish(topics, event.clone());
+}
+
+// ==================== Renew / Rollover (Issue #679) ====================
+
+/// Event emitted when an escrow is renewed (deadline extended, same bounty_id).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowRenewedEvent {
+    pub bounty_id: u64,
+    pub old_deadline: u64,
+    pub new_deadline: u64,
+    pub additional_amount: i128,
+    pub cycle: u32,
+    pub renewed_at: u64,
+}
+
+pub fn emit_escrow_renewed(env: &Env, event: EscrowRenewedEvent) {
+    let topics = (symbol_short!("esc_rnw"), event.bounty_id);
+    env.events().publish(topics, event.clone());
+}
+
+/// Event emitted when a new escrow cycle is created, linked to a previous one.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NewCycleCreatedEvent {
+    pub previous_bounty_id: u64,
+    pub new_bounty_id: u64,
+    pub cycle: u32,
+    pub amount: i128,
+    pub deadline: u64,
+    pub created_at: u64,
+}
+
+pub fn emit_new_cycle_created(env: &Env, event: NewCycleCreatedEvent) {
+    let topics = (symbol_short!("new_cyc"), event.new_bounty_id);
     env.events().publish(topics, event.clone());
 }

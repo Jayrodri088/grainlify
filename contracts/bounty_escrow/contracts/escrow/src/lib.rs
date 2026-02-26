@@ -21,17 +21,17 @@ mod test_rbac;
 mod traits;
 
 use events::{
-    emit_address_frozen, emit_address_unfrozen, emit_batch_funds_locked,
-    emit_batch_funds_released, emit_bounty_initialized, emit_escrow_archived, emit_escrow_cloned,
-    emit_escrow_frozen, emit_escrow_locked, emit_escrow_renewed, emit_escrow_unfrozen,
-    emit_escrow_unlocked, emit_event_batch, emit_funds_locked, emit_funds_locked_anon,
-    emit_funds_refunded, emit_funds_released, emit_new_cycle_created, emit_ticket_claimed,
-    emit_ticket_issued, ActionSummary, AddressFrozenEvent, AddressUnfrozenEvent, BatchFundsLocked,
-    BatchFundsReleased, BountyEscrowInitialized, ClaimCancelled, ClaimCreated, ClaimExecuted,
-    EscrowArchivedEvent, EscrowClonedEvent, EscrowFrozenEvent, EscrowLockedEvent,
-    EscrowRenewedEvent, EscrowUnfrozenEvent, EscrowUnlockedEvent, EventBatch, FundsLocked,
-    FundsLockedAnon, FundsRefunded, FundsReleased, NewCycleCreatedEvent, TicketClaimed,
-    TicketIssued, EVENT_VERSION_V2,
+    emit_address_frozen, emit_address_unfrozen, emit_batch_funds_locked, emit_batch_funds_released,
+    emit_bounty_initialized, emit_escrow_archived, emit_escrow_cloned, emit_escrow_frozen,
+    emit_escrow_locked, emit_escrow_renewed, emit_escrow_unfrozen, emit_escrow_unlocked,
+    emit_event_batch, emit_funds_locked, emit_funds_locked_anon, emit_funds_refunded,
+    emit_funds_released, emit_new_cycle_created, emit_ticket_claimed, emit_ticket_issued,
+    ActionSummary, AddressFrozenEvent, AddressUnfrozenEvent, BatchFundsLocked, BatchFundsReleased,
+    BountyEscrowInitialized, ClaimCancelled, ClaimCreated, ClaimExecuted, EscrowArchivedEvent,
+    EscrowClonedEvent, EscrowFrozenEvent, EscrowLockedEvent, EscrowRenewedEvent,
+    EscrowUnfrozenEvent, EscrowUnlockedEvent, EventBatch, FundsLocked, FundsLockedAnon,
+    FundsRefunded, FundsReleased, NewCycleCreatedEvent, TicketClaimed, TicketIssued,
+    EVENT_VERSION_V2,
 };
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, vec, Address, BytesN,
@@ -3252,6 +3252,28 @@ impl BountyEscrowContract {
         Ok(())
     }
 
+    /// Set the anonymous resolver address (admin only).
+    /// The resolver is authorized to call `refund_resolved` for anonymous escrows.
+    /// Pass `None` to clear/unset the resolver.
+    pub fn set_anonymous_resolver(env: Env, resolver: Option<Address>) -> Result<(), Error> {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        if let Some(r) = resolver {
+            env.storage()
+                .instance()
+                .set(&DataKey::AnonymousResolver, &r);
+        } else {
+            env.storage().instance().remove(&DataKey::AnonymousResolver);
+        }
+
+        Ok(())
+    }
+
     /// Refund an anonymous escrow to a resolved recipient.
     /// Only the configured anonymous resolver can call this; they resolve the depositor
     /// commitment off-chain and pass the recipient address (signed instruction pattern).
@@ -4025,6 +4047,9 @@ impl BountyEscrowContract {
                         stats.total_refunded =
                             stats.total_refunded.checked_add(escrow.amount).unwrap();
                         stats.count_refunded = stats.count_refunded.checked_add(1).unwrap();
+                    }
+                    EscrowStatus::Template => {
+                        // Template escrows have zero funds; excluded from aggregate stats
                     }
                 }
             }
